@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=77.0,<83"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sageum-agent"
+version = "0.1.0"
+description = "Sageum curriculum generation worker"
+readme = "README.md"
+requires-python = ">=3.11,<3.14"
+authors = [{ name = "Sageum" }]
+license = "MIT"
+license-files = ["LICENSE"]
+dependencies = [
+  "fastapi>=0.104.0,<1",
+  "httpx>=0.28.0,<1",
+  "pydantic>=2.7.0,<3",
+  "uvicorn[standard]>=0.24.0,<1",
+]
+
+[project.scripts]
+sageum-agent = "sageum_agent.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["sageum_agent", "sageum_agent.*"]

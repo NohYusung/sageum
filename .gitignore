@@ -5,9 +5,13 @@
 
 .venv/
 venv/
+node_modules/
+.npm-cache/
+.next/
 __pycache__/
 *.py[cod]
 *.egg-info/
+*.tsbuildinfo
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
@@ -17,6 +21,7 @@ tmp/
 data/
 dist/
 build/
+coverage/
 
 .codex/
 .sageum-agent/

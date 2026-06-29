@@ -7,7 +7,7 @@ name = "sageum-agent"
 version = "0.1.0"
 description = "Sageum curriculum generation worker"
 readme = "README.md"
-requires-python = ">=3.11,<3.14"
+requires-python = ">=3.9,<3.14"
 authors = [{ name = "Sageum" }]
 license = "MIT"
 license-files = ["LICENSE"]
@@ -19,6 +19,7 @@ dependencies = [
 ]
 
 [project.scripts]
+sageum = "sageum_agent.tui:main"
 sageum-agent = "sageum_agent.cli:main"
 
 [tool.setuptools.packages.find]

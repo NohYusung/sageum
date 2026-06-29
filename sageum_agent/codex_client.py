@@ -60,6 +60,7 @@ def _codex_headers(access_token: str) -> dict[str, str]:
         "originator": "codex_cli_rs",
         "Content-Type": "application/json",
     }
+    # Leading underscore marks _jwt_claims as a module-internal helper by convention.
     claims = _jwt_claims(access_token)
     account_id = claims.get("https://api.openai.com/auth", {}).get("chatgpt_account_id")
     if isinstance(account_id, str) and account_id:
@@ -229,6 +230,113 @@ def _extract_response_text(payload: dict[str, Any]) -> str:
     return "\n".join(parts).strip()
 
 
+def _dedupe_models(models: list[str]) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for model in models:
+        clean = str(model or "").strip()
+        if not clean or clean in seen:
+            continue
+        seen.add(clean)
+        result.append(clean)
+    return result
+
+
+def _is_unsupported_model_response(status_code: int, body: str) -> bool:
+    if status_code != 400:
+        return False
+    lowered = body.lower()
+    return "model is not supported" in lowered or "unsupported" in lowered
+
+
+def _stream_event_type(event: dict[str, Any]) -> str:
+    value = event.get("type") or event.get("event")
+    return str(value or "")
+
+
+def _stream_text_candidate(event: dict[str, Any]) -> str:
+    for key in ("text", "output_text"):
+        value = event.get(key)
+        if isinstance(value, str) and value:
+            return value
+
+    delta = event.get("delta")
+    if isinstance(delta, str):
+        return delta
+    if isinstance(delta, dict):
+        text = delta.get("text") or delta.get("value")
+        if isinstance(text, str):
+            return text
+
+    part = event.get("part")
+    if isinstance(part, dict):
+        text = part.get("text")
+        if isinstance(text, str):
+            return text
+
+    item = event.get("item")
+    if isinstance(item, dict):
+        return _extract_response_text({"output": [item]})
+
+    return ""
+
+
+def _stream_error_message(event: dict[str, Any]) -> str:
+    error = event.get("error")
+    if isinstance(error, dict):
+        message = error.get("message") or error.get("detail") or error.get("code")
+        if isinstance(message, str) and message:
+            return message
+    if isinstance(error, str) and error:
+        return error
+    return json.dumps(event, ensure_ascii=False)[:500]
+
+
+async def _read_codex_stream_text(response: Any) -> str:
+    text_parts: list[str] = []
+    final_text = ""
+
+    async for raw_line in response.aiter_lines():
+        line = raw_line.strip()
+        if not line or line.startswith(":") or not line.startswith("data:"):
+            continue
+        data = line[len("data:") :].strip()
+        if data == "[DONE]":
+            break
+        try:
+            event = json.loads(data)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(event, dict):
+            continue
+
+        event_type = _stream_event_type(event)
+        if event_type in {"response.failed", "response.incomplete", "error"}:
+            raise RuntimeError(f"Codex stream failed: {_stream_error_message(event)}")
+
+        if event_type.endswith(".delta"):
+            text_parts.append(_stream_text_candidate(event))
+            continue
+
+        if event_type in {
+            "response.output_text.done",
+            "response.content_part.done",
+            "response.output_item.done",
+        }:
+            candidate = _stream_text_candidate(event)
+            if candidate:
+                final_text = candidate
+            continue
+
+        if event_type == "response.completed":
+            response_payload = event.get("response")
+            if isinstance(response_payload, dict):
+                final_text = _extract_response_text(response_payload) or final_text
+
+    text = "".join(text_parts).strip()
+    return text or final_text.strip()
+
+
 async def codex_generate_text(
     prompt: str,
     *,
@@ -240,25 +348,37 @@ async def codex_generate_text(
 
     settings = settings or load_settings()
     credentials = await resolve_codex_credentials(settings)
-    request = {
-        "model": model or settings.codex_model,
-        "instructions": instructions,
-        "input": [{"role": "user", "content": prompt}],
-        "store": False,
-    }
     url = f"{credentials.base_url.rstrip('/')}/responses"
+    models = _dedupe_models([model or settings.codex_model, *settings.codex_model_fallbacks])
+    unsupported_errors: list[str] = []
     async with httpx.AsyncClient(timeout=120.0) as client:
-        response = await client.post(
-            url,
-            headers=_codex_headers(credentials.access_token),
-            json=request,
-        )
-    if response.status_code >= 400:
-        raise RuntimeError(f"Codex request failed: HTTP {response.status_code}: {response.text[:500]}")
-    data = response.json()
-    if not isinstance(data, dict):
-        raise RuntimeError("Codex response was not a JSON object")
-    text = _extract_response_text(data)
-    if not text:
-        raise RuntimeError("Codex response did not contain text output")
-    return text
+        for candidate in models:
+            request = {
+                "model": candidate,
+                "instructions": instructions,
+                "input": [{"role": "user", "content": prompt}],
+                "stream": True,
+                "store": False,
+            }
+            async with client.stream(
+                "POST",
+                url,
+                headers=_codex_headers(credentials.access_token),
+                json=request,
+            ) as response:
+                if response.status_code >= 400:
+                    body = (await response.aread()).decode("utf-8", errors="replace")[:500]
+                    if _is_unsupported_model_response(response.status_code, body) and candidate != models[-1]:
+                        unsupported_errors.append(f"{candidate}: {body}")
+                        continue
+                    tried = ", ".join(models)
+                    raise RuntimeError(
+                        f"Codex request failed after trying models [{tried}]: "
+                        f"HTTP {response.status_code}: {body}"
+                    )
+
+                text = await _read_codex_stream_text(response)
+                if text:
+                    return text
+
+    raise RuntimeError("Codex response did not contain text output")

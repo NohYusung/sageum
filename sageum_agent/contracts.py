@@ -88,7 +88,8 @@ class JobResult:
             sources=sources or [],
             cache_hit=cache_hit,
         )
-
+    # @classmethod는 데코레이터다. failed()는 JobResult 클래스에서 바로 호출되며,
+    # 첫 번째 인자로 클래스(cls)를 받아 실패 결과를 만드는 named constructor 역할을 한다.
     @classmethod
     def failed(cls, *, job_id: str, error: str) -> "JobResult":
         if not error:

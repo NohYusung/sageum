@@ -1,0 +1,3 @@
+interface:
+  display_name: "Study Note Writer"
+  short_description: "Write structured Korean study notes with Mermaid diagrams and source links"

@@ -13,10 +13,24 @@ type WordToken = {
 
 const SENTENCE_END = /[.!?。！？][\]})"'’”]*$/u;
 
-function tokenize(document: NormalizedDocument): WordToken[] {
-  const tokens: WordToken[] = [];
+function segmentKey(document: NormalizedDocument, blockIndex: number) {
+  const location = document.blocks[blockIndex].location;
+  if (location.page !== undefined) return `page:${location.page}`;
+  if (location.sheet) return `sheet:${location.sheet}:range:${location.cellRange ?? ''}`;
+  return 'document';
+}
+
+function tokenizeSegments(document: NormalizedDocument): WordToken[][] {
+  const segments: WordToken[][] = [];
+  let activeKey = '';
 
   document.blocks.forEach((block, blockIndex) => {
+    const key = segmentKey(document, blockIndex);
+    if (key !== activeKey) {
+      segments.push([]);
+      activeKey = key;
+    }
+    const tokens = segments.at(-1)!;
     const words = block.text.trim().split(/\s+/u).filter(Boolean);
     words.forEach((value, wordIndex) => {
       tokens.push({
@@ -27,7 +41,7 @@ function tokenize(document: NormalizedDocument): WordToken[] {
     });
   });
 
-  return tokens;
+  return segments.filter((tokens) => tokens.length);
 }
 
 function validateOptions(options: ChunkingOptions) {
@@ -72,44 +86,45 @@ export function chunkDocument(
   const options = { ...DEFAULT_CHUNKING_OPTIONS, ...overrides };
   validateOptions(options);
 
-  const tokens = tokenize(document);
-  if (!tokens.length) return [];
+  const segments = tokenizeSegments(document);
+  if (!segments.length) return [];
 
   const chunks: DocumentChunk[] = [];
-  let start = 0;
+  segments.forEach((tokens) => {
+    let start = 0;
+    while (start < tokens.length) {
+      const end = chooseChunkEnd(tokens, start, options);
+      const window = tokens.slice(start, end);
+      const firstBlockIndex = window[0].blockIndex;
+      const lastBlockIndex = window[window.length - 1].blockIndex;
+      const firstBlock = document.blocks[firstBlockIndex];
+      const lastBlock = document.blocks[lastBlockIndex];
+      const ordinal = chunks.length;
 
-  while (start < tokens.length) {
-    const end = chooseChunkEnd(tokens, start, options);
-    const window = tokens.slice(start, end);
-    const firstBlockIndex = window[0].blockIndex;
-    const lastBlockIndex = window[window.length - 1].blockIndex;
-    const firstBlock = document.blocks[firstBlockIndex];
-    const lastBlock = document.blocks[lastBlockIndex];
-    const ordinal = chunks.length;
+      chunks.push({
+        id: `${document.versionId}:${String(ordinal).padStart(6, '0')}`,
+        documentId: document.id,
+        versionId: document.versionId,
+        ordinal,
+        text: window.map((token) => token.value).join(' '),
+        wordCount: window.length,
+        headingPath: lastBlock.headingPath.length ? lastBlock.headingPath : firstBlock.headingPath,
+        blockStart: firstBlockIndex,
+        blockEnd: lastBlockIndex,
+        location: {
+          page: firstBlock.location.page ?? lastBlock.location.page,
+          sheet: firstBlock.location.sheet ?? lastBlock.location.sheet,
+          cellRange: firstBlock.location.cellRange ?? lastBlock.location.cellRange,
+          startOffset: firstBlock.location.startOffset,
+          endOffset: lastBlock.location.endOffset,
+        },
+      });
 
-    chunks.push({
-      id: `${document.versionId}:${String(ordinal).padStart(6, '0')}`,
-      documentId: document.id,
-      versionId: document.versionId,
-      ordinal,
-      text: window.map((token) => token.value).join(' '),
-      wordCount: window.length,
-      headingPath: lastBlock.headingPath.length ? lastBlock.headingPath : firstBlock.headingPath,
-      blockStart: firstBlockIndex,
-      blockEnd: lastBlockIndex,
-      location: {
-        page: firstBlock.location.page ?? lastBlock.location.page,
-        sheet: firstBlock.location.sheet ?? lastBlock.location.sheet,
-        cellRange: firstBlock.location.cellRange ?? lastBlock.location.cellRange,
-        startOffset: firstBlock.location.startOffset,
-        endOffset: lastBlock.location.endOffset,
-      },
-    });
-
-    if (end >= tokens.length) break;
-    const nextStart = end - options.overlapWords;
-    start = nextStart > start ? nextStart : end;
-  }
+      if (end >= tokens.length) break;
+      const nextStart = end - options.overlapWords;
+      start = nextStart > start ? nextStart : end;
+    }
+  });
 
   return chunks;
 }

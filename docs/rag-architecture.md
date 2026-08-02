@@ -119,6 +119,7 @@ flowchart LR
 - 완료: Supabase/Qdrant 서버 어댑터와 환경 계약
 - 완료: Supabase 문서·버전·청크 마이그레이션, RLS, private Storage bucket
 - 완료: Supabase Auth, signed direct upload, 서버 파싱·청킹, 메타데이터 영속화
-- 다음: PDF/DOCX/XLSX 파서와 임베딩 공급자
+- 완료: PDF 페이지, DOCX 제목·목록·표, XLSX 시트·셀 범위 파서
+- 다음: 임베딩 공급자 연결
 - 다음: Qdrant 색인·검색, 근거 기반 LLM 스트리밍
 - 마지막: Vercel·Supabase·Qdrant Cloud 연결과 브라우저 E2E

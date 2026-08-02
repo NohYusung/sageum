@@ -35,13 +35,24 @@ test('빈 파일과 10MB 초과 파일을 거부한다', () => {
   );
 });
 
-test('아직 처리하지 못하는 Office 및 알 수 없는 형식을 거부한다', () => {
-  assert.throws(
-    () => validateDocumentMetadata({ name: 'manual.docx', mimeType: '', sizeBytes: 10 }),
-    /다음 단계/u,
+test('PDF·DOCX·XLSX 형식을 처리 대상으로 정규화한다', () => {
+  assert.equal(
+    validateDocumentMetadata({ name: 'manual.docx', mimeType: '', sizeBytes: 10 }).sourceType,
+    'docx',
   );
+  assert.equal(
+    validateDocumentMetadata({ name: 'report.pdf', mimeType: '', sizeBytes: 10 }).sourceType,
+    'pdf',
+  );
+  assert.equal(
+    validateDocumentMetadata({ name: 'metrics.xlsx', mimeType: '', sizeBytes: 10 }).sourceType,
+    'xlsx',
+  );
+});
+
+test('알 수 없는 형식을 거부한다', () => {
   assert.throws(
     () => validateDocumentMetadata({ name: 'archive.zip', mimeType: 'application/zip', sizeBytes: 10 }),
-    /현재 업로드/u,
+    /파일만 업로드/u,
   );
 });

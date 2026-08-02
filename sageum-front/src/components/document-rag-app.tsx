@@ -32,6 +32,7 @@ import {
   type IndexedDocument,
   type SourceReference,
 } from '@/lib/rag/local-search';
+import type { DocumentChunk } from '@/lib/rag/types';
 
 type View = 'chat' | 'documents' | 'upload';
 
@@ -55,9 +56,9 @@ const SUPPORTED_TYPES = [
   { label: 'Markdown', extension: 'MD', ready: true },
   { label: 'HTML', extension: 'HTML', ready: true },
   { label: '텍스트', extension: 'TXT', ready: true },
-  { label: 'PDF', extension: 'PDF', ready: false },
-  { label: 'Word', extension: 'DOCX', ready: false },
-  { label: 'Excel', extension: 'XLSX', ready: false },
+  { label: 'PDF', extension: 'PDF', ready: true },
+  { label: 'Word', extension: 'DOCX', ready: true },
+  { label: 'Excel', extension: 'XLSX', ready: true },
 ];
 
 const INITIAL_MESSAGES: ChatMessage[] = [
@@ -91,6 +92,14 @@ function formatDate(value: string) {
     hour: '2-digit',
     minute: '2-digit',
   }).format(new Date(value));
+}
+
+function chunkLocation(location: DocumentChunk['location']) {
+  if (location.page !== undefined) return `${location.page}페이지`;
+  if (location.sheet) {
+    return location.cellRange ? `${location.sheet} · ${location.cellRange}` : location.sheet;
+  }
+  return null;
 }
 
 function fileIcon(type: IndexedDocument['document']['sourceType']) {
@@ -421,7 +430,11 @@ export function DocumentRagApp({
                         <span>{chunk.ordinal + 1}</span>
                         <p>
                           <strong>{chunk.headingPath.join(' › ') || '본문'}</strong>
-                          <small>{chunk.wordCount} words</small>
+                          <small>
+                            {[chunkLocation(chunk.location), `${chunk.wordCount} words`]
+                              .filter(Boolean)
+                              .join(' · ')}
+                          </small>
                         </p>
                       </div>
                     ))}

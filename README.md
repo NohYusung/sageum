@@ -8,7 +8,8 @@
 
 - Next.js 16 기반 문서 저장소·챗·업로드 UI
 - Supabase 이메일 Auth와 보안 쿠키 세션
-- Markdown, HTML, TXT 서버 파싱
+- Markdown, HTML, TXT, PDF, DOCX, XLSX 서버 파싱
+- PDF 페이지, DOCX 제목 계층, XLSX 시트·셀 범위를 보존하는 구조 추출
 - 제목 경로와 원문 위치를 유지하는 구조화 블록
 - 400단어 목표, 최대 500단어, 60단어 중첩의 단어 기반 청킹
 - 로컬 어휘 검색과 근거 없는 답변 거부
@@ -22,7 +23,6 @@
 
 ## 다음 구현 범위
 
-- PDF, DOCX, XLSX 서버 파서
 - 임베딩 공급자와 Qdrant 실제 색인·검색 API
 - 검색 결과를 근거로 하는 LLM 답변 스트리밍
 - Vercel·Supabase·Qdrant Cloud 환경 연결
@@ -47,7 +47,8 @@ npm run dev
 ```
 
 - Supabase URL과 publishable key를 설정하고 이메일 계정을 만든 뒤 실행합니다.
-- 업로드한 Markdown, HTML, TXT는 private Storage와 PostgreSQL에 영구 저장됩니다.
+- 업로드한 MD, HTML, TXT, PDF, DOCX, XLSX는 private Storage와 PostgreSQL에 영구 저장됩니다.
+- PDF 파서는 페이지, DOCX 파서는 제목 경로, XLSX 파서는 시트와 표 범위를 청크에 기록합니다.
 - 공급자 키는 `NEXT_PUBLIC_` 접두사가 없는 서버 환경변수로만 저장합니다.
 
 ## 검증

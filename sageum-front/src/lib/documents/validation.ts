@@ -24,7 +24,14 @@ const MIME_TYPES = new Map<string, DocumentSourceType>([
   ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'xlsx'],
 ]);
 
-const CAN_PROCESS = new Set<DocumentSourceType>(['markdown', 'html', 'text']);
+const CAN_PROCESS = new Set<DocumentSourceType>([
+  'markdown',
+  'html',
+  'text',
+  'pdf',
+  'docx',
+  'xlsx',
+]);
 const DEFAULT_MIME_TYPES: Record<DocumentSourceType, string> = {
   markdown: 'text/markdown',
   html: 'text/html',
@@ -84,7 +91,7 @@ export function validateDocumentMetadata(input: {
 
   const sourceType = detectDocumentSourceType(name, input.mimeType);
   if (!sourceType) {
-    throw new DocumentValidationError('Markdown, HTML, TXT 파일만 현재 업로드할 수 있습니다.');
+    throw new DocumentValidationError('MD, HTML, TXT, PDF, DOCX, XLSX 파일만 업로드할 수 있습니다.');
   }
   if (!CAN_PROCESS.has(sourceType)) {
     throw new DocumentValidationError(

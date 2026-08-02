@@ -70,3 +70,31 @@ test('잘못된 청킹 옵션을 거부한다', () => {
     /overlapWords/u,
   );
 });
+
+test('페이지 경계가 다른 블록을 하나의 청크로 합치지 않는다', () => {
+  const document = makeDocument(0);
+  document.blocks = [
+    {
+      id: 'page-1',
+      kind: 'paragraph',
+      text: Array.from({ length: 80 }, (_, index) => `첫페이지${index}`).join(' '),
+      headingPath: [],
+      location: { page: 1 },
+    },
+    {
+      id: 'page-2',
+      kind: 'paragraph',
+      text: Array.from({ length: 80 }, (_, index) => `둘째페이지${index}`).join(' '),
+      headingPath: [],
+      location: { page: 2 },
+    },
+  ];
+
+  const chunks = chunkDocument(document, {
+    targetWords: 120,
+    maxWords: 140,
+    overlapWords: 20,
+  });
+
+  assert.deepEqual(chunks.map((chunk) => chunk.location.page), [1, 2]);
+});

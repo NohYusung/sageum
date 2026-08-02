@@ -4,8 +4,12 @@ import type { ProcessDocumentResponse } from '@/lib/documents/contracts';
 import { DOCUMENT_BUCKET, DocumentValidationError } from '@/lib/documents/validation';
 import { chunkDocument } from '@/lib/rag/chunker';
 import type { IndexedDocument } from '@/lib/rag/local-search';
-import { parseTextDocumentSource } from '@/lib/rag/parser';
 import { getAuthenticatedRequestContext } from '@/lib/server/api-auth';
+import {
+  DocumentParsingError,
+  parseDocumentSource,
+  parserVersion,
+} from '@/lib/server/document-parser';
 import type { Database, TablesInsert } from '@/lib/supabase/database.types';
 
 export const runtime = 'nodejs';
@@ -105,8 +109,7 @@ export async function POST(
     if (fileBuffer.byteLength !== version.size_bytes) {
       throw new ProcessingError('업로드된 원본 파일 크기가 요청 정보와 일치하지 않습니다.', 422);
     }
-    const source = new TextDecoder('utf-8').decode(fileBuffer);
-    const parsed = parseTextDocumentSource(source, {
+    const parsed = await parseDocumentSource(new Uint8Array(fileBuffer), {
       name: version.original_filename,
       mimeType: version.mime_type,
       sizeBytes: version.size_bytes,
@@ -163,7 +166,7 @@ export async function POST(
     const versionMetadata = {
       blockCount: parsed.blocks.length,
       chunkCount: chunks.length,
-      parser: 'text-v1',
+      parser: parserVersion(parsed.sourceType),
       processedAt,
       processingStartedAt: startedAt,
     };
@@ -188,10 +191,16 @@ export async function POST(
     const response = { document: indexedDocument } satisfies ProcessDocumentResponse;
     return Response.json(response);
   } catch (error) {
-    const publicError = error instanceof ProcessingError || error instanceof DocumentValidationError
+    const publicError = error instanceof ProcessingError
+      || error instanceof DocumentValidationError
+      || error instanceof DocumentParsingError
       ? error.message
       : '문서 처리에 실패했습니다.';
-    const status = error instanceof ProcessingError ? error.status : 500;
+    const status = error instanceof ProcessingError
+      ? error.status
+      : error instanceof DocumentValidationError || error instanceof DocumentParsingError
+        ? 422
+        : 500;
     console.error('Document processing failed', error);
     await markVersionFailed(context.supabase, context.ownerId, versionId, publicError);
     return Response.json({ error: publicError }, { status });

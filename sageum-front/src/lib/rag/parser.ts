@@ -1,4 +1,5 @@
 import type {
+  DocumentLocation,
   DocumentSourceType,
   NormalizedBlock,
   NormalizedDocument,
@@ -15,13 +16,12 @@ function createId() {
   });
 }
 
-function pushBlock(
+export function appendNormalizedBlock(
   blocks: NormalizedBlock[],
   kind: NormalizedBlock['kind'],
   text: string,
   headingPath: string[],
-  startOffset: number,
-  endOffset: number,
+  location: DocumentLocation = {},
 ) {
   const normalized = text.replace(/\s+/gu, ' ').trim();
   if (!normalized) return;
@@ -30,8 +30,19 @@ function pushBlock(
     kind,
     text: normalized,
     headingPath: [...headingPath],
-    location: { startOffset, endOffset },
+    location: { ...location },
   });
+}
+
+function pushBlock(
+  blocks: NormalizedBlock[],
+  kind: NormalizedBlock['kind'],
+  text: string,
+  headingPath: string[],
+  startOffset: number,
+  endOffset: number,
+) {
+  appendNormalizedBlock(blocks, kind, text, headingPath, { startOffset, endOffset });
 }
 
 export function normalizeMarkdownSource(
@@ -87,7 +98,7 @@ export function normalizeMarkdownSource(
   });
 
   flushParagraph(source.length);
-  return buildDocument(name, mimeType, 'markdown', source.length, blocks);
+  return buildNormalizedDocument(name, mimeType, 'markdown', source.length, blocks);
 }
 
 function decodeHtmlEntities(value: string) {
@@ -128,19 +139,20 @@ export function normalizeTextSource(
   return { ...document, sourceType: 'text' };
 }
 
-function buildDocument(
+export function buildNormalizedDocument(
   name: string,
   mimeType: string,
   sourceType: DocumentSourceType,
   sizeBytes: number,
   blocks: NormalizedBlock[],
+  documentId?: string,
+  versionId?: string,
 ): NormalizedDocument {
-  const id = createId();
   const firstHeading = blocks.find((block) => block.kind === 'heading')?.text;
   const fallbackTitle = name.replace(/\.[^.]+$/u, '');
   return {
-    id,
-    versionId: createId(),
+    id: documentId ?? createId(),
+    versionId: versionId ?? createId(),
     name,
     title: firstHeading || fallbackTitle,
     mimeType,
@@ -148,16 +160,6 @@ function buildDocument(
     sizeBytes,
     blocks,
   };
-}
-
-export async function parseBrowserFile(file: File): Promise<NormalizedDocument> {
-  const metadata = validateDocumentMetadata({
-    name: file.name,
-    mimeType: file.type,
-    sizeBytes: file.size,
-  });
-  const source = await file.text();
-  return parseTextDocumentSource(source, metadata);
 }
 
 export function parseTextDocumentSource(
@@ -171,6 +173,9 @@ export function parseTextDocumentSource(
   },
 ) {
   const metadata = validateDocumentMetadata(input);
+  if (!['markdown', 'html', 'text'].includes(metadata.sourceType)) {
+    throw new Error('바이너리 문서는 서버 문서 파서를 사용해야 합니다.');
+  }
   let document: NormalizedDocument;
 
   if (metadata.sourceType === 'html') {

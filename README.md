@@ -60,6 +60,7 @@ npm run dev
 - Qdrant 설정이 없으면 기존 로컬 어휘 검색으로 동작하고, 설정하면 업로드부터 브라우저 임베딩·Qdrant 벡터 검색까지 활성화됩니다.
 - Qdrant 및 선택적 서버 공급자 키는 `NEXT_PUBLIC_` 접두사가 없는 서버 환경변수로만 저장합니다.
 - 공급자 환경변수를 설정한 뒤 `npm run qdrant:setup`으로 Collection과 필터 index를 미리 준비할 수 있습니다.
+- `npm run qdrant:smoke`는 임시 벡터를 색인하고 소유자·모델·문서 필터 검색을 검증한 뒤 point를 즉시 삭제합니다.
 
 ## 검증
 
@@ -68,6 +69,7 @@ cd sageum-front
 npm test
 npm run typecheck
 npm run build
+npm run qdrant:smoke
 ```
 
 ## 이전 코드

@@ -11,7 +11,8 @@
     "start": "next start",
     "test": "tsx --test 'src/**/*.test.ts'",
     "typecheck": "tsc --noEmit",
-    "qdrant:setup": "node --env-file=.env.local --import tsx scripts/setup-qdrant.ts"
+    "qdrant:setup": "node --env-file=.env.local --import tsx scripts/setup-qdrant.ts",
+    "qdrant:smoke": "node --env-file=.env.local --import tsx scripts/smoke-qdrant.ts"
   },
   "dependencies": {
     "@huggingface/transformers": "3.8.1",

@@ -40,6 +40,14 @@ const DEFAULT_MIME_TYPES: Record<DocumentSourceType, string> = {
   docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
 };
+const STORAGE_EXTENSIONS: Record<DocumentSourceType, string> = {
+  markdown: 'md',
+  html: 'html',
+  text: 'txt',
+  pdf: 'pdf',
+  docx: 'docx',
+  xlsx: 'xlsx',
+};
 
 export class DocumentValidationError extends Error {
   constructor(message: string) {
@@ -62,15 +70,8 @@ export function initialDocumentTitle(name: string) {
   return (withoutExtension || '제목 없는 문서').slice(0, 500);
 }
 
-export function safeStorageFileName(name: string) {
-  const basename = name.split(/[\\/]/u).at(-1)?.normalize('NFKC') ?? '';
-  const safe = basename
-    .replace(/[^\p{L}\p{N}._ -]/gu, '_')
-    .replace(/\s+/gu, '_')
-    .replace(/_+/gu, '_')
-    .replace(/^[._-]+/u, '')
-    .slice(0, 180);
-  return safe || 'document.txt';
+export function storageObjectName(versionId: string, sourceType: DocumentSourceType) {
+  return `${versionId}.${STORAGE_EXTENSIONS[sourceType]}`;
 }
 
 export function validateDocumentMetadata(input: {
@@ -105,6 +106,5 @@ export function validateDocumentMetadata(input: {
     sourceType,
     mimeType: DEFAULT_MIME_TYPES[sourceType],
     sizeBytes: input.sizeBytes,
-    storageFileName: safeStorageFileName(name),
   };
 }

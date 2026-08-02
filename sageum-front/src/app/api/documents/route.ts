@@ -3,6 +3,7 @@ import type { CreateDocumentUploadResponse } from '@/lib/documents/contracts';
 import {
   DocumentValidationError,
   DOCUMENT_BUCKET,
+  storageObjectName,
   validateDocumentMetadata,
 } from '@/lib/documents/validation';
 import { getAuthenticatedRequestContext } from '@/lib/server/api-auth';
@@ -57,7 +58,7 @@ export async function POST(request: Request) {
 
   const documentId = randomUUID();
   const versionId = randomUUID();
-  const storagePath = `${context.ownerId}/${documentId}/${versionId}/${metadata.storageFileName}`;
+  const storagePath = `${context.ownerId}/${documentId}/${versionId}/${storageObjectName(versionId, metadata.sourceType)}`;
   const { error: documentError } = await context.supabase.from('documents').insert({
     id: documentId,
     owner_id: context.ownerId,

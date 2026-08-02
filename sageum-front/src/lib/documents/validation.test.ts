@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   MAX_DOCUMENT_BYTES,
-  safeStorageFileName,
+  storageObjectName,
   validateDocumentMetadata,
 } from './validation';
 
@@ -15,13 +15,14 @@ test('Markdown 확장자를 MIME보다 우선해 정규화한다', () => {
       sourceType: 'markdown',
       mimeType: 'text/markdown',
       sizeBytes: 128,
-      storageFileName: '정책_문서.md',
     },
   );
 });
 
-test('경로 문자가 포함된 파일명을 안전한 Storage 파일명으로 바꾼다', () => {
-  assert.equal(safeStorageFileName('../보고서 / 2026?.txt'), '2026_.txt');
+test('Storage 객체명은 원본 파일명과 무관한 ASCII 버전 키를 사용한다', () => {
+  const versionId = 'd9a356c0-87f2-4d3d-b3ce-38971390b623';
+  assert.equal(storageObjectName(versionId, 'docx'), `${versionId}.docx`);
+  assert.equal(storageObjectName(versionId, 'xlsx'), `${versionId}.xlsx`);
 });
 
 test('빈 파일과 10MB 초과 파일을 거부한다', () => {

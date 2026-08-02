@@ -130,14 +130,18 @@ export async function POST(
     }
 
     const providers = getProviderConfiguration();
-    if (providers.embedding.configured !== providers.qdrant.configured) {
+    if (providers.qdrant.configured && !providers.embedding.configured) {
       throw new ProcessingError(
-        '임베딩과 Qdrant 환경 설정은 모두 설정하거나 모두 비워야 합니다.',
+        'Qdrant를 사용하려면 올바른 임베딩 설정이 필요합니다.',
         503,
       );
     }
 
     const vectorIndexEnabled = providers.embedding.configured && providers.qdrant.configured;
+    const browserVectorIndexEnabled = vectorIndexEnabled
+      && providers.embedding.execution === 'browser';
+    const serverVectorIndexEnabled = vectorIndexEnabled
+      && providers.embedding.execution === 'server';
     if (vectorIndexEnabled) {
       const indexingStartedAt = new Date().toISOString();
       const { error: indexingStatusError } = await context.supabase
@@ -153,23 +157,26 @@ export async function POST(
         throw new ProcessingError('문서 인덱싱 상태를 갱신하지 못했습니다.');
       }
 
-      const embeddingProvider = getEmbeddingProvider();
-      const vectors = await embeddingProvider.embedDocuments(chunks.map((chunk) => [
-        parsed.title,
-        chunk.headingPath.join(' › '),
-        chunk.text,
-      ].filter(Boolean).join('\n')));
-      vectorStore = getQdrantVectorStore();
-      await vectorStore.ensureCollection(embeddingProvider.dimensions);
-      vectorIndexStarted = true;
-      await vectorStore.deleteByVersion(context.ownerId, versionId);
-      await vectorStore.upsert(chunks.map((chunk, index) => ({
-        chunk,
-        ownerId: context.ownerId,
-        sourceType: parsed.sourceType,
-        documentTitle: parsed.title,
-        vector: vectors[index],
-      })));
+      if (serverVectorIndexEnabled) {
+        const embeddingProvider = getEmbeddingProvider();
+        const vectors = await embeddingProvider.embedDocuments(chunks.map((chunk) => [
+          parsed.title,
+          chunk.headingPath.join(' › '),
+          chunk.text,
+        ].filter(Boolean).join('\n')));
+        vectorStore = getQdrantVectorStore();
+        await vectorStore.ensureCollection(embeddingProvider.dimensions);
+        vectorIndexStarted = true;
+        await vectorStore.deleteByVersion(context.ownerId, versionId);
+        await vectorStore.upsert(chunks.map((chunk, index) => ({
+          chunk,
+          ownerId: context.ownerId,
+          sourceType: parsed.sourceType,
+          documentTitle: parsed.title,
+          embeddingModel: embeddingProvider.model,
+          vector: vectors[index],
+        })));
+      }
     }
 
     const { error: clearChunksError } = await context.supabase
@@ -220,7 +227,7 @@ export async function POST(
       parser: parserVersion(parsed.sourceType),
       processedAt,
       processingStartedAt: startedAt,
-      vectorIndexed: vectorIndexEnabled,
+      vectorIndexed: serverVectorIndexEnabled,
       embeddingProvider: vectorIndexEnabled ? providers.embedding.provider : null,
       embeddingModel: vectorIndexEnabled ? providers.embedding.model : null,
       embeddingDimensions: vectorIndexEnabled ? providers.embedding.dimensions : null,
@@ -228,7 +235,7 @@ export async function POST(
     const { error: versionUpdateError } = await context.supabase
       .from('document_versions')
       .update({
-        status: 'ready',
+        status: browserVectorIndexEnabled ? 'indexing' : 'ready',
         content_hash: contentHash,
         error_message: null,
         metadata: versionMetadata,
@@ -240,10 +247,21 @@ export async function POST(
     const indexedDocument: IndexedDocument = {
       document: { ...parsed, blocks: [] },
       chunks,
-      status: 'ready',
+      status: browserVectorIndexEnabled ? 'processing' : 'ready',
       indexedAt: processedAt,
     };
-    const response = { document: indexedDocument } satisfies ProcessDocumentResponse;
+    const response = {
+      document: indexedDocument,
+      vectorIndex: browserVectorIndexEnabled
+        ? {
+            required: true,
+            provider: providers.embedding.provider ?? '',
+            model: providers.embedding.model ?? '',
+            dtype: providers.embedding.dtype ?? '',
+            dimensions: providers.embedding.dimensions,
+          }
+        : null,
+    } satisfies ProcessDocumentResponse;
     return Response.json(response);
   } catch (error) {
     if (vectorIndexStarted && vectorStore) {

@@ -22,12 +22,19 @@ export async function POST(request: Request) {
   if (!context) return Response.json({ error: '로그인이 필요합니다.' }, { status: 401 });
 
   const configuration = getProviderConfiguration();
-  if (!configuration.embedding.configured || !configuration.qdrant.configured) {
+  if (!configuration.qdrant.configured) {
     return Response.json(
       {
-        error: '임베딩과 Qdrant 환경 설정이 모두 필요합니다.',
+        error: 'Qdrant 환경 설정이 필요합니다.',
         code: 'VECTOR_SEARCH_NOT_CONFIGURED',
       },
+      { status: 503 },
+    );
+  }
+
+  if (!configuration.embedding.configured || !configuration.embedding.model) {
+    return Response.json(
+      { error: '올바른 임베딩 환경 설정이 필요합니다.' },
       { status: 503 },
     );
   }
@@ -43,14 +50,43 @@ export async function POST(request: Request) {
   }
 
   try {
-    const embeddingProvider = getEmbeddingProvider();
     const vectorStore = getQdrantVectorStore();
-    const queryVector = await embeddingProvider.embedQuery(search.query);
-    await vectorStore.ensureCollection(embeddingProvider.dimensions);
+    let queryVector: number[];
+    if (search.queryVector) {
+      if (configuration.embedding.execution !== 'browser') {
+        return Response.json(
+          { error: '현재 임베딩 설정은 브라우저 질문 벡터를 받지 않습니다.' },
+          { status: 400 },
+        );
+      }
+      if (
+        search.embeddingModel !== configuration.embedding.model
+        || search.queryVector.length !== configuration.embedding.dimensions
+      ) {
+        return Response.json(
+          { error: '질문 벡터가 현재 EmbeddingGemma 색인 설정과 일치하지 않습니다.' },
+          { status: 400 },
+        );
+      }
+      queryVector = search.queryVector;
+    } else {
+      if (configuration.embedding.execution !== 'server') {
+        return Response.json(
+          {
+            error: '브라우저에서 생성한 EmbeddingGemma 질문 벡터가 필요합니다.',
+            code: 'QUERY_VECTOR_REQUIRED',
+          },
+          { status: 400 },
+        );
+      }
+      queryVector = await getEmbeddingProvider().embedQuery(search.query);
+    }
+    await vectorStore.ensureCollection(configuration.embedding.dimensions);
     const results = await vectorStore.query(queryVector, context.ownerId, {
       limit: search.topK,
       documentIds: search.documentIds,
       scoreThreshold: scoreThreshold(),
+      embeddingModel: configuration.embedding.model,
     });
     const sources: SourceReference[] = results.map((result) => ({
       documentId: result.documentId,

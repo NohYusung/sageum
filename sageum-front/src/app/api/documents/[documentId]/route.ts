@@ -41,13 +41,6 @@ export async function DELETE(
   }
 
   const providers = getProviderConfiguration();
-  if (providers.embedding.configured !== providers.qdrant.configured) {
-    return Response.json(
-      { error: '임베딩과 Qdrant 환경 설정을 모두 확인해 주세요.' },
-      { status: 503 },
-    );
-  }
-
   try {
     if (providers.qdrant.configured) {
       await getQdrantVectorStore().deleteByDocument(context.ownerId, documentId);

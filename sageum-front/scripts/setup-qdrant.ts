@@ -1,4 +1,3 @@
-import { getEmbeddingProvider } from '../src/lib/server/embedding-provider';
 import { getProviderConfiguration } from '../src/lib/server/env';
 import { getQdrantVectorStore } from '../src/lib/server/qdrant-store';
 
@@ -6,14 +5,13 @@ async function main() {
   const providers = getProviderConfiguration();
   if (!providers.embedding.configured || !providers.qdrant.configured) {
     throw new Error(
-      'QDRANT_URL, QDRANT_API_KEY, EMBEDDING_PROVIDER, EMBEDDING_API_KEY, EMBEDDING_MODEL을 설정해 주세요.',
+      'QDRANT_URL과 QDRANT_API_KEY를 설정해 주세요.',
     );
   }
 
-  const embeddingProvider = getEmbeddingProvider();
-  await getQdrantVectorStore().ensureCollection(embeddingProvider.dimensions);
+  await getQdrantVectorStore().ensureCollection(providers.embedding.dimensions);
   console.log(
-    `Qdrant Collection '${providers.qdrant.collection}' 준비 완료 (${embeddingProvider.dimensions} dimensions).`,
+    `Qdrant Collection '${providers.qdrant.collection}' 준비 완료 (${providers.embedding.dimensions} dimensions).`,
   );
 }
 

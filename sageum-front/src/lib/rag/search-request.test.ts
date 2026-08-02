@@ -14,6 +14,8 @@ test('검색 요청의 기본 topK와 중복 제거된 문서 필터를 반환�
       query: '재택근무 기준',
       documentIds: [DOCUMENT_ID],
       topK: 8,
+      queryVector: null,
+      embeddingModel: null,
     },
   );
 });
@@ -30,4 +32,22 @@ test('검색 결과 개수를 1~20으로 제한한다', () => {
   assert.throws(() => parseSearchRequest({ query: '질문', topK: 0 }), /1~20/u);
   assert.throws(() => parseSearchRequest({ query: '질문', topK: 21 }), /1~20/u);
   assert.equal(parseSearchRequest({ query: '질문', topK: 4 }).topK, 4);
+});
+
+test('브라우저 질문 벡터와 모델을 함께 검증한다', () => {
+  const parsed = parseSearchRequest({
+    query: '질문',
+    queryVector: [0.1, 0.2, 0.3],
+    embeddingModel: 'embeddinggemma',
+  });
+  assert.deepEqual(parsed.queryVector, [0.1, 0.2, 0.3]);
+  assert.equal(parsed.embeddingModel, 'embeddinggemma');
+  assert.throws(
+    () => parseSearchRequest({ query: '질문', queryVector: [0, 0, 0], embeddingModel: 'model' }),
+    /질문 벡터/u,
+  );
+  assert.throws(
+    () => parseSearchRequest({ query: '질문', queryVector: [0.1] }),
+    /임베딩 모델/u,
+  );
 });

@@ -7,6 +7,8 @@ export type SearchRequest = {
   query: string;
   documentIds: string[];
   topK: number;
+  queryVector: number[] | null;
+  embeddingModel: string | null;
 };
 
 export class SearchRequestError extends Error {
@@ -45,5 +47,31 @@ export function parseSearchRequest(input: unknown): SearchRequest {
     throw new SearchRequestError(`검색 결과 개수는 1~${MAX_TOP_K} 사이여야 합니다.`);
   }
 
-  return { query, documentIds, topK };
+  const queryVector = body.queryVector === undefined
+    ? null
+    : Array.isArray(body.queryVector)
+      ? body.queryVector
+      : null;
+  if (body.queryVector !== undefined && !queryVector) {
+    throw new SearchRequestError('질문 벡터 형식이 올바르지 않습니다.');
+  }
+  if (queryVector && (
+    !queryVector.length
+    || queryVector.length > 4096
+    || !queryVector.every((value) => typeof value === 'number' && Number.isFinite(value))
+    || !queryVector.some((value) => Math.abs(value) > Number.EPSILON)
+  )) {
+    throw new SearchRequestError('질문 벡터에 올바르지 않은 값이 포함되어 있습니다.');
+  }
+  const embeddingModel = typeof body.embeddingModel === 'string'
+    ? body.embeddingModel.trim()
+    : null;
+  if (queryVector && !embeddingModel) {
+    throw new SearchRequestError('질문 벡터의 임베딩 모델이 필요합니다.');
+  }
+  if (!queryVector && body.embeddingModel !== undefined) {
+    throw new SearchRequestError('질문 벡터 없이 임베딩 모델만 지정할 수 없습니다.');
+  }
+
+  return { query, documentIds, topK, queryVector, embeddingModel };
 }

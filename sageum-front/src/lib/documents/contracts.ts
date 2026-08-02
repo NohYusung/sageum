@@ -14,6 +14,18 @@ export type CreateDocumentUploadResponse = {
 
 export type ProcessDocumentResponse = {
   document: IndexedDocument;
+  vectorIndex: {
+    required: true;
+    provider: string;
+    model: string;
+    dtype: string;
+    dimensions: number;
+  } | null;
+};
+
+export type IndexDocumentVectorsResponse = {
+  indexedAt: string;
+  vectorCount: number;
 };
 
 export type SearchDocumentsResponse = {

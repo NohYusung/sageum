@@ -1,3 +1,11 @@
+import {
+  BROWSER_EMBEDDING_COLLECTION,
+  BROWSER_EMBEDDING_DIMENSIONS,
+  BROWSER_EMBEDDING_DTYPE,
+  BROWSER_EMBEDDING_MODEL,
+  BROWSER_EMBEDDING_PROVIDER,
+} from '@/lib/embedding/config';
+
 export type ProviderConfiguration = {
   supabase: {
     configured: boolean;
@@ -11,6 +19,8 @@ export type ProviderConfiguration = {
     provider: string | null;
     model: string | null;
     dimensions: number;
+    execution: 'browser' | 'server' | null;
+    dtype: string | null;
   };
 };
 
@@ -25,11 +35,25 @@ const SUPPORTED_EMBEDDING_PROVIDERS = new Set([
   'openai-compatible',
 ]);
 
+const BROWSER_EMBEDDING_PROVIDERS = new Set([
+  'browser',
+  'browser-embeddinggemma',
+  'embeddinggemma',
+]);
+
 export function getProviderConfiguration(): ProviderConfiguration {
-  const dimensions = Number.parseInt(value('EMBEDDING_DIMENSIONS') ?? '768', 10);
-  const embeddingProvider = value('EMBEDDING_PROVIDER')?.toLocaleLowerCase('en-US') ?? null;
-  const embeddingModel = value('EMBEDDING_MODEL');
-  const validDimensions = Number.isFinite(dimensions) && dimensions > 0 ? dimensions : 768;
+  const requestedProvider = value('EMBEDDING_PROVIDER')?.toLocaleLowerCase('en-US')
+    ?? BROWSER_EMBEDDING_PROVIDER;
+  const browserEmbedding = BROWSER_EMBEDDING_PROVIDERS.has(requestedProvider);
+  const serverEmbedding = SUPPORTED_EMBEDDING_PROVIDERS.has(requestedProvider);
+  const requestedDimensions = Number.parseInt(value('EMBEDDING_DIMENSIONS') ?? '768', 10);
+  const validDimensions = Number.isFinite(requestedDimensions) && requestedDimensions > 0
+    ? requestedDimensions
+    : 768;
+  const embeddingProvider = browserEmbedding ? BROWSER_EMBEDDING_PROVIDER : requestedProvider;
+  const embeddingModel = browserEmbedding ? BROWSER_EMBEDDING_MODEL : value('EMBEDDING_MODEL');
+  const dimensions = browserEmbedding ? BROWSER_EMBEDDING_DIMENSIONS : validDimensions;
+  const execution = browserEmbedding ? 'browser' : serverEmbedding ? 'server' : null;
   return {
     supabase: {
       configured: Boolean(
@@ -39,18 +63,18 @@ export function getProviderConfiguration(): ProviderConfiguration {
     },
     qdrant: {
       configured: Boolean(value('QDRANT_URL') && value('QDRANT_API_KEY')),
-      collection: value('QDRANT_COLLECTION') ?? 'document_chunks',
+      collection: value('QDRANT_COLLECTION')
+        ?? (browserEmbedding ? BROWSER_EMBEDDING_COLLECTION : 'document_chunks'),
     },
     embedding: {
       configured: Boolean(
-        embeddingProvider &&
-          SUPPORTED_EMBEDDING_PROVIDERS.has(embeddingProvider) &&
-          embeddingModel &&
-          value('EMBEDDING_API_KEY'),
+        browserEmbedding || (serverEmbedding && embeddingModel && value('EMBEDDING_API_KEY')),
       ),
       provider: embeddingProvider,
       model: embeddingModel,
-      dimensions: validDimensions,
+      dimensions,
+      execution,
+      dtype: browserEmbedding ? BROWSER_EMBEDDING_DTYPE : null,
     },
   };
 }

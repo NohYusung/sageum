@@ -31,6 +31,10 @@ import type {
   SearchDocumentsResponse,
 } from '@/lib/documents/contracts';
 import {
+  embedSearchQuery,
+  type EmbeddingProgress,
+} from '@/lib/embedding/browser-client';
+import {
   composeExtractiveAnswer,
   searchDocuments,
   type IndexedDocument,
@@ -52,7 +56,14 @@ type SystemStatus = {
   providers: {
     supabase: { configured: boolean };
     qdrant: { configured: boolean; collection: string };
-    embedding: { configured: boolean; model: string | null };
+    embedding: {
+      configured: boolean;
+      provider: string | null;
+      model: string | null;
+      dimensions: number;
+      execution: 'browser' | 'server' | null;
+      dtype: string | null;
+    };
   };
 };
 
@@ -112,11 +123,53 @@ function sourceLocation(source: SourceReference) {
   return null;
 }
 
-async function searchRepository(documents: IndexedDocument[], query: string) {
+function embeddingProgressLabel(progress: EmbeddingProgress) {
+  if (progress.phase === 'embedding') {
+    return `EmbeddingGemma Q8 벡터 생성 중 · ${progress.completed}/${progress.total}`;
+  }
+  const percentage = typeof progress.progress === 'number'
+    ? Math.max(0, Math.min(100, Math.round(progress.progress)))
+    : progress.loaded !== undefined && progress.total
+      ? Math.round((progress.loaded / progress.total) * 100)
+      : null;
+  return percentage === null
+    ? 'EmbeddingGemma Q8 모델 준비 중'
+    : `EmbeddingGemma Q8 모델 준비 중 · ${percentage}%`;
+}
+
+async function currentSystemStatus(system: SystemStatus | null) {
+  if (system) return system;
+  const response = await fetch('/api/system');
+  if (!response.ok) throw new Error('검색 공급자 상태를 확인하지 못했습니다.');
+  return response.json() as Promise<SystemStatus>;
+}
+
+async function searchRepository(
+  documents: IndexedDocument[],
+  query: string,
+  system: SystemStatus | null,
+  onEmbeddingProgress: (progress: EmbeddingProgress) => void,
+) {
+  const activeSystem = await currentSystemStatus(system);
+  const browserVectorSearch = activeSystem.providers.qdrant.configured
+    && activeSystem.providers.embedding.configured
+    && activeSystem.providers.embedding.execution === 'browser';
+  const queryVector = browserVectorSearch
+    ? await embedSearchQuery(query, onEmbeddingProgress)
+    : null;
   const response = await fetch('/api/search', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ query, topK: 8 }),
+    body: JSON.stringify({
+      query,
+      topK: 8,
+      ...(queryVector
+        ? {
+            queryVector,
+            embeddingModel: activeSystem.providers.embedding.model,
+          }
+        : {}),
+    }),
   });
   const payload = await response.json().catch(() => null) as
     | SearchDocumentsResponse
@@ -166,6 +219,7 @@ export function DocumentRagApp({
   const [uploadMessage, setUploadMessage] = useState<string | null>(null);
   const [uploadBusy, setUploadBusy] = useState(false);
   const [searchBusy, setSearchBusy] = useState(false);
+  const [embeddingActivity, setEmbeddingActivity] = useState<string | null>(null);
   const [system, setSystem] = useState<SystemStatus | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const conversationRef = useRef<HTMLDivElement | null>(null);
@@ -205,9 +259,12 @@ export function DocumentRagApp({
     if (!files.length) return;
     setUploadBusy(true);
     setUploadMessage(null);
+    setEmbeddingActivity(null);
 
     const results = await Promise.allSettled(
-      files.map((file) => uploadAndProcessDocument(file)),
+      files.map((file) => uploadAndProcessDocument(file, {
+        onEmbeddingProgress: (progress) => setEmbeddingActivity(embeddingProgressLabel(progress)),
+      })),
     );
 
     const succeeded = results.flatMap((result) => (result.status === 'fulfilled' ? [result.value] : []));
@@ -235,6 +292,7 @@ export function DocumentRagApp({
       setUploadMessage(`실패: ${failures.join(' ')}`);
     }
     setUploadBusy(false);
+    setEmbeddingActivity(null);
   }
 
   async function handleQuestion(event: FormEvent<HTMLFormElement>) {
@@ -245,13 +303,19 @@ export function DocumentRagApp({
     const now = Date.now();
     setQuery('');
     setSearchBusy(true);
+    setEmbeddingActivity(null);
     setMessages((current) => [
       ...current,
       { id: `user-${now}`, role: 'user', text: question },
     ]);
 
     try {
-      const result = await searchRepository(documents, question);
+      const result = await searchRepository(
+        documents,
+        question,
+        system,
+        (progress) => setEmbeddingActivity(embeddingProgressLabel(progress)),
+      );
       setMessages((current) => [
         ...current,
         {
@@ -275,6 +339,7 @@ export function DocumentRagApp({
       setActiveSources([]);
     } finally {
       setSearchBusy(false);
+      setEmbeddingActivity(null);
     }
   }
 
@@ -317,6 +382,11 @@ export function DocumentRagApp({
             <i className={system?.providers.supabase.configured ? 'connected' : ''} />
             Supabase
             <em>{system?.providers.supabase.configured ? '연결됨' : '대기'}</em>
+          </div>
+          <div className="provider-row">
+            <i className={system?.providers.embedding.configured ? 'connected' : ''} />
+            EmbeddingGemma
+            <em>{system?.providers.embedding.dtype?.toUpperCase() ?? '대기'}</em>
           </div>
           <div className="provider-row">
             <i className={system?.providers.qdrant.configured ? 'connected' : ''} />
@@ -407,7 +477,7 @@ export function DocumentRagApp({
                   {searchBusy ? <LoaderCircle size={18} className="spin" /> : <Send size={18} />}
                 </button>
               </form>
-              <p>현재는 검색·출처 흐름을 검증하는 추출형 답변 모드입니다.</p>
+              <p>{embeddingActivity ?? '현재는 검색·출처 흐름을 검증하는 추출형 답변 모드입니다.'}</p>
             </div>
           </section>
         ) : null}
@@ -533,7 +603,7 @@ export function DocumentRagApp({
                 }}
               >
                 {uploadBusy ? <LoaderCircle size={34} className="spin" /> : <UploadCloud size={34} />}
-                <h2>{uploadBusy ? '문서를 구조화하는 중입니다' : '문서를 여기에 놓으세요'}</h2>
+                <h2>{uploadBusy ? embeddingActivity ?? '문서를 구조화하는 중입니다' : '문서를 여기에 놓으세요'}</h2>
                 <p>원문을 분석하고 300~500단어 단위의 검색 청크로 변환합니다.</p>
                 <button type="button" onClick={() => fileInputRef.current?.click()} disabled={uploadBusy}>
                   파일 선택

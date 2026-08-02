@@ -213,6 +213,11 @@ let embeddingProvider: EmbeddingProvider | null = null;
 export function getEmbeddingProvider() {
   if (embeddingProvider) return embeddingProvider;
   const configuration = getProviderConfiguration().embedding;
+  if (configuration.execution !== 'server') {
+    throw new EmbeddingProviderError(
+      '브라우저 EmbeddingGemma는 서버 임베딩 공급자로 실행할 수 없습니다.',
+    );
+  }
   const provider = requireServerEnvironment('EMBEDDING_PROVIDER').toLocaleLowerCase('en-US');
   const options: ProviderOptions = {
     apiKey: requireServerEnvironment('EMBEDDING_API_KEY'),

@@ -12,7 +12,8 @@
 - PDF 페이지, DOCX 제목 계층, XLSX 시트·셀 범위를 보존하는 구조 추출
 - 제목 경로와 원문 위치를 유지하는 구조화 블록
 - 400단어 목표, 최대 500단어, 60단어 중첩의 단어 기반 청킹
-- Gemini·OpenAI 호환 임베딩 공급자 어댑터
+- 브라우저 Web Worker에서 실행하는 EmbeddingGemma 300M ONNX Q8 임베딩
+- 선택적으로 사용할 수 있는 Gemini·OpenAI 호환 서버 임베딩 어댑터
 - 사용자·문서 필터를 강제하는 Qdrant 벡터 색인·검색
 - 공급자 미설정 시 로컬 어휘 검색 fallback과 근거 없는 답변 거부
 - 답변별 원문 청크와 문서 상세 연결
@@ -21,7 +22,8 @@
 - signed upload URL을 이용한 Storage 직접 업로드
 - 문서 처리 API의 구조 추출, SHA-256 해시, 단어 청킹, PostgreSQL 영속화
 - 문서 처리·재처리·삭제 시 Qdrant 벡터 생명주기 연결
-- 인증된 `/api/search`의 질문 임베딩과 사용자별 Qdrant 검색
+- 인증된 벡터 색인 API의 소유권·버전·전체 청크·모델 차원 검증
+- 브라우저 질문 임베딩과 인증된 `/api/search`의 사용자별 Qdrant 검색
 - 로그인 사용자별 문서와 최신 청크 복원
 - 공급자 설정 상태를 노출하는 `/api/system`
 
@@ -35,8 +37,8 @@
 - Supabase private Storage: 원본 파일
 - Supabase PostgreSQL: 문서, 버전, 처리 상태, 청크 메타데이터
 - Qdrant: 임베딩 벡터, 검색용 청크 텍스트, 문서·버전 필터 payload
-- 브라우저: Supabase publishable key와 경로가 제한된 단기 업로드 토큰만 사용
-- Next.js 서버: 사용자 쿠키 세션으로 RLS를 적용하고 Qdrant·임베딩 비밀키는 서버에서만 사용
+- 브라우저: Supabase publishable key와 경로가 제한된 단기 업로드 토큰만 사용하고, Web Worker에서 Q8 문서·질문 벡터 생성
+- Next.js 서버: 사용자 쿠키 세션으로 RLS를 적용하고 Qdrant 비밀키를 서버에서만 사용하며 브라우저 벡터의 소유권·모델 계약 검증
 
 상세 설계는 [docs/rag-architecture.md](docs/rag-architecture.md)를 참고합니다.
 
@@ -52,9 +54,11 @@ npm run dev
 - Supabase URL과 publishable key를 설정하고 이메일 계정을 만든 뒤 실행합니다.
 - 업로드한 MD, HTML, TXT, PDF, DOCX, XLSX는 private Storage와 PostgreSQL에 영구 저장됩니다.
 - PDF 파서는 페이지, DOCX 파서는 제목 경로, XLSX 파서는 시트와 표 범위를 청크에 기록합니다.
-- `EMBEDDING_PROVIDER=gemini`, `EMBEDDING_MODEL=gemini-embedding-001`, 768차원을 무료 데모 기본값으로 사용합니다.
-- Qdrant와 임베딩 설정이 모두 없으면 기존 로컬 검색으로 동작하고, 모두 설정하면 업로드부터 벡터 검색까지 활성화됩니다.
-- 공급자 키는 `NEXT_PUBLIC_` 접두사가 없는 서버 환경변수로만 저장합니다.
+- 무료 데모 기본값은 `onnx-community/embeddinggemma-300m-ONNX`의 Q8, 768차원입니다. 별도 임베딩 API 키가 필요하지 않습니다.
+- 최초 벡터 생성 시 브라우저가 약 330MB의 모델·토크나이저 파일을 내려받고 브라우저 캐시에 저장합니다.
+- 로컬에 보유한 GGUF Q8과 같은 계열·정밀도지만, 웹 배포에서는 Transformers.js가 실행할 수 있는 ONNX Q8 변환본을 사용합니다.
+- Qdrant 설정이 없으면 기존 로컬 어휘 검색으로 동작하고, 설정하면 업로드부터 브라우저 임베딩·Qdrant 벡터 검색까지 활성화됩니다.
+- Qdrant 및 선택적 서버 공급자 키는 `NEXT_PUBLIC_` 접두사가 없는 서버 환경변수로만 저장합니다.
 - 공급자 환경변수를 설정한 뒤 `npm run qdrant:setup`으로 Collection과 필터 index를 미리 준비할 수 있습니다.
 
 ## 검증

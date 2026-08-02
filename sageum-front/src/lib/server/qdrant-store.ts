@@ -8,6 +8,7 @@ export type EmbeddedChunk = {
   ownerId: string;
   sourceType: string;
   documentTitle: string;
+  embeddingModel: string;
   vector: number[];
 };
 
@@ -31,6 +32,7 @@ export type VectorSearchOptions = {
   limit?: number;
   documentIds?: string[];
   scoreThreshold?: number;
+  embeddingModel: string;
 };
 
 export type QdrantClientAdapter = Pick<
@@ -49,6 +51,7 @@ const PAYLOAD_INDEXES = [
   { field_name: 'document_id', field_schema: 'uuid' as const },
   { field_name: 'version_id', field_schema: 'uuid' as const },
   { field_name: 'source_type', field_schema: 'keyword' as const },
+  { field_name: 'embedding_model', field_schema: 'keyword' as const },
 ];
 
 function deterministicUuid(seed: string) {
@@ -121,7 +124,14 @@ export class QdrantVectorStore {
     if (!chunks.length) return;
     await this.client.upsert(this.collectionName, {
       wait: true,
-      points: chunks.map(({ chunk, ownerId, sourceType, documentTitle, vector }) => ({
+      points: chunks.map(({
+        chunk,
+        ownerId,
+        sourceType,
+        documentTitle,
+        embeddingModel,
+        vector,
+      }) => ({
         id: deterministicUuid(chunk.id),
         vector,
         payload: {
@@ -131,6 +141,7 @@ export class QdrantVectorStore {
           chunk_id: chunk.id,
           document_title: documentTitle,
           source_type: sourceType,
+          embedding_model: embeddingModel,
           ordinal: chunk.ordinal,
           text: chunk.text,
           heading_path: chunk.headingPath,
@@ -145,10 +156,11 @@ export class QdrantVectorStore {
   async query(
     vector: number[],
     ownerId: string,
-    options: VectorSearchOptions = {},
+    options: VectorSearchOptions,
   ): Promise<VectorSearchResult[]> {
     const must = [
       { key: 'owner_id', match: { value: ownerId } },
+      { key: 'embedding_model', match: { value: options.embeddingModel } },
       ...(options.documentIds?.length
         ? [{ key: 'document_id', match: { any: options.documentIds } }]
         : []),

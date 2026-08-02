@@ -82,7 +82,13 @@ test('Collection과 필터 payload index를 벡터 저장 전에 준비한다', 
   const store = new QdrantVectorStore(fake.client, 'document_chunks');
 
   await store.ensureCollection(3);
-  assert.deepEqual(fake.createdIndexes, ['owner_id', 'document_id', 'version_id', 'source_type']);
+  assert.deepEqual(fake.createdIndexes, [
+    'owner_id',
+    'document_id',
+    'version_id',
+    'source_type',
+    'embedding_model',
+  ]);
 });
 
 test('기존 Collection 차원이 다르면 색인을 거부한다', async () => {
@@ -107,6 +113,7 @@ test('청크 위치를 payload로 저장하고 소유자·문서 필터로 검�
     ownerId: '123e4567-e89b-42d3-a456-426614174010',
     sourceType: 'pdf',
     documentTitle: '운영 가이드',
+    embeddingModel: 'embeddinggemma',
     vector: [0.1, 0.2, 0.3],
   }]);
   const upsert = fake.upserts[0] as { points: Array<{ payload: Record<string, unknown> }> };
@@ -116,14 +123,22 @@ test('청크 위치를 payload로 저장하고 소유자·문서 필터로 검�
   const results = await store.query(
     [0.1, 0.2, 0.3],
     '123e4567-e89b-42d3-a456-426614174010',
-    { documentIds: [CHUNK.documentId], limit: 8, scoreThreshold: 0.45 },
+    {
+      documentIds: [CHUNK.documentId],
+      limit: 8,
+      scoreThreshold: 0.45,
+      embeddingModel: 'embeddinggemma',
+    },
   );
   const query = fake.queries[0] as {
     filter: { must: Array<{ key: string }> };
     limit: number;
     score_threshold: number;
   };
-  assert.deepEqual(query.filter.must.map((condition) => condition.key), ['owner_id', 'document_id']);
+  assert.deepEqual(
+    query.filter.must.map((condition) => condition.key),
+    ['owner_id', 'embedding_model', 'document_id'],
+  );
   assert.equal(query.limit, 8);
   assert.equal(query.score_threshold, 0.45);
   assert.equal(results[0].documentTitle, '운영 가이드');

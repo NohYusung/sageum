@@ -1,8 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import {
-  BROWSER_EMBEDDING_DIMENSIONS,
-  BROWSER_EMBEDDING_MODEL,
-} from '../src/lib/embedding/config';
 import type { DocumentChunk } from '../src/lib/rag/types';
 import { getProviderConfiguration } from '../src/lib/server/env';
 import { getQdrantVectorStore } from '../src/lib/server/qdrant-store';
@@ -12,19 +8,13 @@ async function main() {
   if (!providers.qdrant.configured) {
     throw new Error('QDRANT_URL과 QDRANT_API_KEY를 설정해 주세요.');
   }
-  if (
-    providers.embedding.model !== BROWSER_EMBEDDING_MODEL
-    || providers.embedding.dimensions !== BROWSER_EMBEDDING_DIMENSIONS
-  ) {
-    throw new Error('EmbeddingGemma Q8 브라우저 임베딩 설정이 필요합니다.');
+  if (!providers.embedding.configured) {
+    throw new Error('Qdrant Cloud Inference 설정이 필요합니다.');
   }
 
   const ownerId = randomUUID();
   const documentId = randomUUID();
   const versionId = randomUUID();
-  const vector = Array.from({ length: BROWSER_EMBEDDING_DIMENSIONS }, (_, index) =>
-    index === 0 ? 1 : 0,
-  );
   const chunk: DocumentChunk = {
     id: `qdrant-smoke-${randomUUID()}`,
     documentId,
@@ -39,21 +29,20 @@ async function main() {
   };
   const store = getQdrantVectorStore();
 
-  await store.ensureCollection(BROWSER_EMBEDDING_DIMENSIONS);
+  await store.ensureCollection(providers.embedding.dimensions);
   try {
     await store.upsert([{
       chunk,
       ownerId,
       sourceType: 'text',
       documentTitle: 'Qdrant smoke test',
-      embeddingModel: BROWSER_EMBEDDING_MODEL,
-      vector,
+      embeddingModel: providers.embedding.model,
     }]);
-    const results = await store.query(vector, ownerId, {
+    const results = await store.query('Qdrant Cloud 연결 확인', ownerId, {
       documentIds: [documentId],
-      embeddingModel: BROWSER_EMBEDDING_MODEL,
+      embeddingModel: providers.embedding.model,
       limit: 1,
-      scoreThreshold: 0.99,
+      scoreThreshold: 0.2,
     });
     if (results.length !== 1 || results[0].chunkId !== chunk.id) {
       throw new Error('Qdrant 소유자·모델·문서 필터 검색 결과가 예상과 다릅니다.');
@@ -62,18 +51,18 @@ async function main() {
     await store.deleteByVersion(ownerId, versionId);
   }
 
-  const deletedResults = await store.query(vector, ownerId, {
+  const deletedResults = await store.query('Qdrant Cloud 연결 확인', ownerId, {
     documentIds: [documentId],
-    embeddingModel: BROWSER_EMBEDDING_MODEL,
+    embeddingModel: providers.embedding.model,
     limit: 1,
-    scoreThreshold: 0.99,
+    scoreThreshold: 0.2,
   });
   if (deletedResults.length) {
     throw new Error('Qdrant 스모크 테스트 point 정리에 실패했습니다.');
   }
 
   console.log(
-    `Qdrant Cloud 스모크 테스트 통과: '${providers.qdrant.collection}' 색인·필터 검색·삭제 정상.`,
+    `Qdrant Cloud Inference 스모크 테스트 통과: '${providers.qdrant.collection}' 임베딩·하이브리드 검색·소유자 필터·삭제 정상.`,
   );
 }
 

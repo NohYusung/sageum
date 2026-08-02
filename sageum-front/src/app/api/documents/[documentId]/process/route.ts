@@ -10,11 +10,11 @@ import {
   parseDocumentSource,
   parserVersion,
 } from '@/lib/server/document-parser';
-import { getEmbeddingProvider } from '@/lib/server/embedding-provider';
 import { getProviderConfiguration } from '@/lib/server/env';
 import {
   getQdrantVectorStore,
   QdrantConfigurationError,
+  QdrantInferenceError,
 } from '@/lib/server/qdrant-store';
 import type { Database, TablesInsert } from '@/lib/supabase/database.types';
 
@@ -130,18 +130,7 @@ export async function POST(
     }
 
     const providers = getProviderConfiguration();
-    if (providers.qdrant.configured && !providers.embedding.configured) {
-      throw new ProcessingError(
-        'Qdrant를 사용하려면 올바른 임베딩 설정이 필요합니다.',
-        503,
-      );
-    }
-
     const vectorIndexEnabled = providers.embedding.configured && providers.qdrant.configured;
-    const browserVectorIndexEnabled = vectorIndexEnabled
-      && providers.embedding.execution === 'browser';
-    const serverVectorIndexEnabled = vectorIndexEnabled
-      && providers.embedding.execution === 'server';
     if (vectorIndexEnabled) {
       const indexingStartedAt = new Date().toISOString();
       const { error: indexingStatusError } = await context.supabase
@@ -157,26 +146,17 @@ export async function POST(
         throw new ProcessingError('문서 인덱싱 상태를 갱신하지 못했습니다.');
       }
 
-      if (serverVectorIndexEnabled) {
-        const embeddingProvider = getEmbeddingProvider();
-        const vectors = await embeddingProvider.embedDocuments(chunks.map((chunk) => [
-          parsed.title,
-          chunk.headingPath.join(' › '),
-          chunk.text,
-        ].filter(Boolean).join('\n')));
-        vectorStore = getQdrantVectorStore();
-        await vectorStore.ensureCollection(embeddingProvider.dimensions);
-        vectorIndexStarted = true;
-        await vectorStore.deleteByVersion(context.ownerId, versionId);
-        await vectorStore.upsert(chunks.map((chunk, index) => ({
-          chunk,
-          ownerId: context.ownerId,
-          sourceType: parsed.sourceType,
-          documentTitle: parsed.title,
-          embeddingModel: embeddingProvider.model,
-          vector: vectors[index],
-        })));
-      }
+      vectorStore = getQdrantVectorStore();
+      await vectorStore.ensureCollection(providers.embedding.dimensions);
+      vectorIndexStarted = true;
+      await vectorStore.deleteByVersion(context.ownerId, versionId);
+      await vectorStore.upsert(chunks.map((chunk) => ({
+        chunk,
+        ownerId: context.ownerId,
+        sourceType: parsed.sourceType,
+        documentTitle: parsed.title,
+        embeddingModel: providers.embedding.model,
+      })));
     }
 
     const { error: clearChunksError } = await context.supabase
@@ -227,7 +207,7 @@ export async function POST(
       parser: parserVersion(parsed.sourceType),
       processedAt,
       processingStartedAt: startedAt,
-      vectorIndexed: serverVectorIndexEnabled,
+      vectorIndexed: vectorIndexEnabled,
       embeddingProvider: vectorIndexEnabled ? providers.embedding.provider : null,
       embeddingModel: vectorIndexEnabled ? providers.embedding.model : null,
       embeddingDimensions: vectorIndexEnabled ? providers.embedding.dimensions : null,
@@ -235,7 +215,7 @@ export async function POST(
     const { error: versionUpdateError } = await context.supabase
       .from('document_versions')
       .update({
-        status: browserVectorIndexEnabled ? 'indexing' : 'ready',
+        status: 'ready',
         content_hash: contentHash,
         error_message: null,
         metadata: versionMetadata,
@@ -247,21 +227,10 @@ export async function POST(
     const indexedDocument: IndexedDocument = {
       document: { ...parsed, blocks: [] },
       chunks,
-      status: browserVectorIndexEnabled ? 'processing' : 'ready',
+      status: 'ready',
       indexedAt: processedAt,
     };
-    const response = {
-      document: indexedDocument,
-      vectorIndex: browserVectorIndexEnabled
-        ? {
-            required: true,
-            provider: providers.embedding.provider ?? '',
-            model: providers.embedding.model ?? '',
-            dtype: providers.embedding.dtype ?? '',
-            dimensions: providers.embedding.dimensions,
-          }
-        : null,
-    } satisfies ProcessDocumentResponse;
+    const response = { document: indexedDocument } satisfies ProcessDocumentResponse;
     return Response.json(response);
   } catch (error) {
     if (vectorIndexStarted && vectorStore) {
@@ -275,12 +244,15 @@ export async function POST(
       || error instanceof DocumentValidationError
       || error instanceof DocumentParsingError
       || error instanceof QdrantConfigurationError
+      || error instanceof QdrantInferenceError
       ? error.message
       : '문서 처리에 실패했습니다.';
     const status = error instanceof ProcessingError
       ? error.status
       : error instanceof QdrantConfigurationError
         ? 503
+      : error instanceof QdrantInferenceError
+        ? 502
       : error instanceof DocumentValidationError || error instanceof DocumentParsingError
         ? 422
         : 500;

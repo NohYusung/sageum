@@ -3,14 +3,8 @@
 import type {
   ApiErrorResponse,
   CreateDocumentUploadResponse,
-  IndexDocumentVectorsResponse,
   ProcessDocumentResponse,
 } from '@/lib/documents/contracts';
-import {
-  embedDocumentChunks,
-  type EmbeddingProgress,
-} from '@/lib/embedding/browser-client';
-import { MAX_BROWSER_VECTOR_CHUNKS } from '@/lib/embedding/vector-index-request';
 import type { IndexedDocument } from '@/lib/rag/local-search';
 import { createClient } from '@/lib/supabase/client';
 import { DOCUMENT_BUCKET } from './validation';
@@ -35,26 +29,8 @@ async function markMissingUploadAsFailed(documentId: string, versionId: string) 
   }).catch(() => undefined);
 }
 
-export type UploadDocumentOptions = {
-  onEmbeddingProgress?: (progress: EmbeddingProgress) => void;
-};
-
-async function markVectorIndexAsFailed(
-  documentId: string,
-  versionId: string,
-  error: unknown,
-) {
-  const message = error instanceof Error ? error.message : '브라우저 임베딩에 실패했습니다.';
-  await fetch(`/api/documents/${encodeURIComponent(documentId)}/vectors`, {
-    method: 'DELETE',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ versionId, error: message }),
-  }).catch(() => undefined);
-}
-
 export async function uploadAndProcessDocument(
   file: File,
-  options: UploadDocumentOptions = {},
 ): Promise<IndexedDocument> {
   const createResponse = await fetch('/api/documents', {
     method: 'POST',
@@ -95,47 +71,5 @@ export async function uploadAndProcessDocument(
     },
   );
   const processed = await responseJson<ProcessDocumentResponse>(processResponse);
-  if (!processed.vectorIndex) return processed.document;
-
-  if (processed.document.chunks.length > MAX_BROWSER_VECTOR_CHUNKS) {
-    const error = new Error(
-      `브라우저 색인은 문서당 최대 ${MAX_BROWSER_VECTOR_CHUNKS}개 청크를 지원합니다. 파일을 나눠 업로드해 주세요.`,
-    );
-    await markVectorIndexAsFailed(upload.documentId, upload.versionId, error);
-    throw error;
-  }
-
-  try {
-    const vectors = await embedDocumentChunks(
-      processed.document.document.title,
-      processed.document.chunks,
-      options.onEmbeddingProgress,
-    );
-    const vectorResponse = await fetch(
-      `/api/documents/${encodeURIComponent(upload.documentId)}/vectors`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          versionId: upload.versionId,
-          model: processed.vectorIndex.model,
-          dtype: processed.vectorIndex.dtype,
-          dimensions: processed.vectorIndex.dimensions,
-          vectors: processed.document.chunks.map((chunk, index) => ({
-            chunkId: chunk.id,
-            vector: vectors[index],
-          })),
-        }),
-      },
-    );
-    const indexed = await responseJson<IndexDocumentVectorsResponse>(vectorResponse);
-    return {
-      ...processed.document,
-      status: 'ready',
-      indexedAt: indexed.indexedAt,
-    };
-  } catch (error) {
-    await markVectorIndexAsFailed(upload.documentId, upload.versionId, error);
-    throw error;
-  }
+  return processed.document;
 }

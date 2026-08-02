@@ -22,7 +22,12 @@ function fakeClient(vectorSize = 3) {
       return true;
     },
     getCollection: async () => ({
-      config: { params: { vectors: { size: vectorSize, distance: 'Cosine' } } },
+      config: {
+        params: {
+          vectors: { dense: { size: vectorSize, distance: 'Cosine' } },
+          sparse_vectors: { bm25: { modifier: 'idf' } },
+        },
+      },
       payload_schema: payloadSchema,
     }),
     createPayloadIndex: async (_collection: string, input: { field_name: string }) => {
@@ -94,7 +99,8 @@ test('Collection과 필터 payload index를 벡터 저장 전에 준비한다', 
 test('기존 Collection 차원이 다르면 색인을 거부한다', async () => {
   const fake = fakeClient(4);
   await fake.client.createCollection('document_chunks', {
-    vectors: { size: 4, distance: 'Cosine' },
+    vectors: { dense: { size: 4, distance: 'Cosine' } },
+    sparse_vectors: { bm25: { modifier: 'idf' } },
   });
   const store = new QdrantVectorStore(fake.client, 'document_chunks');
 
@@ -113,25 +119,41 @@ test('청크 위치를 payload로 저장하고 소유자·문서 필터로 검�
     ownerId: '123e4567-e89b-42d3-a456-426614174010',
     sourceType: 'pdf',
     documentTitle: '운영 가이드',
-    embeddingModel: 'embeddinggemma',
-    vector: [0.1, 0.2, 0.3],
+    embeddingModel: 'sentence-transformers/all-minilm-l6-v2',
   }]);
-  const upsert = fake.upserts[0] as { points: Array<{ payload: Record<string, unknown> }> };
+  const upsert = fake.upserts[0] as {
+    points: Array<{
+      vector: Record<string, { text: string; model: string; options?: Record<string, unknown> }>;
+      payload: Record<string, unknown>;
+    }>;
+  };
   assert.equal(upsert.points[0].payload.page, 2);
   assert.equal(upsert.points[0].payload.cell_range, 'A1:B2');
+  assert.equal(
+    upsert.points[0].vector.dense.model,
+    'sentence-transformers/all-minilm-l6-v2',
+  );
+  assert.match(upsert.points[0].vector.dense.text, /운영 가이드.*신청 기준.*재택근무/su);
+  assert.equal(upsert.points[0].vector.bm25.model, 'qdrant/bm25');
+  assert.equal(upsert.points[0].vector.bm25.options?.tokenizer, 'multilingual');
 
   const results = await store.query(
-    [0.1, 0.2, 0.3],
+    '재택근무 기준',
     '123e4567-e89b-42d3-a456-426614174010',
     {
       documentIds: [CHUNK.documentId],
       limit: 8,
       scoreThreshold: 0.45,
-      embeddingModel: 'embeddinggemma',
+      embeddingModel: 'sentence-transformers/all-minilm-l6-v2',
     },
   );
   const query = fake.queries[0] as {
     filter: { must: Array<{ key: string }> };
+    prefetch: Array<{
+      using: string;
+      query: { text: string; model: string; options?: Record<string, unknown> };
+    }>;
+    query: { fusion: string };
     limit: number;
     score_threshold: number;
   };
@@ -141,6 +163,10 @@ test('청크 위치를 payload로 저장하고 소유자·문서 필터로 검�
   );
   assert.equal(query.limit, 8);
   assert.equal(query.score_threshold, 0.45);
+  assert.deepEqual(query.prefetch.map(({ using }) => using), ['dense', 'bm25']);
+  assert.equal(query.prefetch[0].query.text, '재택근무 기준');
+  assert.equal(query.prefetch[1].query.options?.tokenizer, 'multilingual');
+  assert.equal(query.query.fusion, 'rrf');
   assert.equal(results[0].documentTitle, '운영 가이드');
   assert.equal(results[0].page, 2);
 });

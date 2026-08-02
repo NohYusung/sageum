@@ -2,19 +2,19 @@ import type { SearchDocumentsResponse } from '@/lib/documents/contracts';
 import { composeExtractiveAnswer, type SourceReference } from '@/lib/rag/local-search';
 import { parseSearchRequest, SearchRequestError } from '@/lib/rag/search-request';
 import { getAuthenticatedRequestContext } from '@/lib/server/api-auth';
-import { EmbeddingProviderError, getEmbeddingProvider } from '@/lib/server/embedding-provider';
 import { getProviderConfiguration } from '@/lib/server/env';
 import {
   getQdrantVectorStore,
   QdrantConfigurationError,
+  QdrantInferenceError,
 } from '@/lib/server/qdrant-store';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 function scoreThreshold() {
-  const value = Number.parseFloat(process.env.QDRANT_SCORE_THRESHOLD?.trim() ?? '0.45');
-  return Number.isFinite(value) && value >= 0 && value <= 1 ? value : 0.45;
+  const value = Number.parseFloat(process.env.QDRANT_SCORE_THRESHOLD?.trim() ?? '0.2');
+  return Number.isFinite(value) && value >= 0 ? value : 0.2;
 }
 
 export async function POST(request: Request) {
@@ -32,9 +32,9 @@ export async function POST(request: Request) {
     );
   }
 
-  if (!configuration.embedding.configured || !configuration.embedding.model) {
+  if (!configuration.embedding.configured) {
     return Response.json(
-      { error: '올바른 임베딩 환경 설정이 필요합니다.' },
+      { error: 'Qdrant Cloud Inference 환경 설정이 필요합니다.' },
       { status: 503 },
     );
   }
@@ -51,38 +51,8 @@ export async function POST(request: Request) {
 
   try {
     const vectorStore = getQdrantVectorStore();
-    let queryVector: number[];
-    if (search.queryVector) {
-      if (configuration.embedding.execution !== 'browser') {
-        return Response.json(
-          { error: '현재 임베딩 설정은 브라우저 질문 벡터를 받지 않습니다.' },
-          { status: 400 },
-        );
-      }
-      if (
-        search.embeddingModel !== configuration.embedding.model
-        || search.queryVector.length !== configuration.embedding.dimensions
-      ) {
-        return Response.json(
-          { error: '질문 벡터가 현재 EmbeddingGemma 색인 설정과 일치하지 않습니다.' },
-          { status: 400 },
-        );
-      }
-      queryVector = search.queryVector;
-    } else {
-      if (configuration.embedding.execution !== 'server') {
-        return Response.json(
-          {
-            error: '브라우저에서 생성한 EmbeddingGemma 질문 벡터가 필요합니다.',
-            code: 'QUERY_VECTOR_REQUIRED',
-          },
-          { status: 400 },
-        );
-      }
-      queryVector = await getEmbeddingProvider().embedQuery(search.query);
-    }
     await vectorStore.ensureCollection(configuration.embedding.dimensions);
-    const results = await vectorStore.query(queryVector, context.ownerId, {
+    const results = await vectorStore.query(search.query, context.ownerId, {
       limit: search.topK,
       documentIds: search.documentIds,
       scoreThreshold: scoreThreshold(),
@@ -111,9 +81,13 @@ export async function POST(request: Request) {
     if (error instanceof QdrantConfigurationError) {
       return Response.json({ error: error.message }, { status: 503 });
     }
-    const message = error instanceof EmbeddingProviderError
-      ? '질문 임베딩을 생성하지 못했습니다.'
-      : '문서 벡터 검색에 실패했습니다.';
-    return Response.json({ error: message }, { status: 502 });
+    return Response.json(
+      {
+        error: error instanceof QdrantInferenceError
+          ? error.message
+          : '문서 벡터 검색에 실패했습니다.',
+      },
+      { status: 502 },
+    );
   }
 }

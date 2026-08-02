@@ -11,7 +11,7 @@ async function main() {
 
   await getQdrantVectorStore().ensureCollection(providers.embedding.dimensions);
   console.log(
-    `Qdrant Collection '${providers.qdrant.collection}' 준비 완료 (${providers.embedding.dimensions} dimensions).`,
+    `Qdrant Cloud Inference Collection '${providers.qdrant.collection}' 준비 완료 (${providers.embedding.model}, ${providers.embedding.dimensions} dimensions).`,
   );
 }
 

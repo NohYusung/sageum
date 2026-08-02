@@ -15,7 +15,6 @@
     "qdrant:smoke": "node --env-file=.env.local --import tsx scripts/smoke-qdrant.ts"
   },
   "dependencies": {
-    "@huggingface/transformers": "3.8.1",
     "@qdrant/js-client-rest": "1.18.0",
     "@supabase/ssr": "0.12.4",
     "@supabase/supabase-js": "2.111.0",

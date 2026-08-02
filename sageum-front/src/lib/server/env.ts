@@ -24,8 +24,7 @@ export function getProviderConfiguration(): ProviderConfiguration {
     supabase: {
       configured: Boolean(
         value('NEXT_PUBLIC_SUPABASE_URL') &&
-          value('NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY') &&
-          value('SUPABASE_SECRET_KEY'),
+          value('NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY'),
       ),
     },
     qdrant: {

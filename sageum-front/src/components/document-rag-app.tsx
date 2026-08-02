@@ -13,17 +13,18 @@ import {
   HardDriveUpload,
   Library,
   LoaderCircle,
+  LogOut,
   MessageSquareText,
   Paperclip,
   Search,
   Send,
-  Settings2,
   ShieldCheck,
   Sparkles,
   UploadCloud,
   XCircle,
 } from 'lucide-react';
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { logoutAction } from '@/app/actions';
 import { chunkDocument } from '@/lib/rag/chunker';
 import {
   composeExtractiveAnswer,
@@ -198,7 +199,7 @@ function fileIcon(type: IndexedDocument['document']['sourceType']) {
   return FileText;
 }
 
-export function DocumentRagApp() {
+export function DocumentRagApp({ userEmail }: { userEmail: string }) {
   const [view, setView] = useState<View>('chat');
   const [documents, setDocuments] = useState<IndexedDocument[]>(DEMO_DOCUMENTS);
   const [messages, setMessages] = useState<ChatMessage[]>(INITIAL_MESSAGES);
@@ -211,6 +212,7 @@ export function DocumentRagApp() {
   const [system, setSystem] = useState<SystemStatus | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const conversationRef = useRef<HTMLDivElement | null>(null);
+  const userInitial = userEmail.charAt(0).toLocaleUpperCase('ko-KR') || '?';
 
   useEffect(() => {
     fetch('/api/system')
@@ -348,12 +350,16 @@ export function DocumentRagApp() {
         </div>
 
         <div className="rag-profile">
-          <div className="rag-avatar">N</div>
+          <div className="rag-avatar">{userInitial}</div>
           <div>
-            <strong>개인 데모</strong>
-            <span>{system?.mode === 'cloud' ? 'Cloud mode' : 'Local validation mode'}</span>
+            <strong title={userEmail}>{userEmail}</strong>
+            <span>{system?.mode === 'cloud' ? 'Cloud mode' : '개인 데모'}</span>
           </div>
-          <Settings2 size={16} />
+          <form action={logoutAction}>
+            <button type="submit" aria-label="로그아웃" title="로그아웃">
+              <LogOut size={16} />
+            </button>
+          </form>
         </div>
       </aside>
 
@@ -383,7 +389,7 @@ export function DocumentRagApp() {
               {messages.map((message) => (
                 <article className={`message ${message.role}`} key={message.id}>
                   <div className="message-avatar">
-                    {message.role === 'assistant' ? <Bot size={18} /> : 'N'}
+                    {message.role === 'assistant' ? <Bot size={18} /> : userInitial}
                   </div>
                   <div className="message-content">
                     <span className="message-author">{message.role === 'assistant' ? 'Sageum' : '나'}</span>

@@ -13,12 +13,13 @@
 - 로컬 어휘 검색과 근거 없는 답변 거부
 - 답변별 원문 청크와 문서 상세 연결
 - Supabase 서버 클라이언트 및 Qdrant 컬렉션 어댑터 골격
+- Supabase 문서·버전·청크 스키마, 소유자 RLS, private `documents` bucket
 - 공급자 설정 상태를 노출하는 `/api/system`
 
 ## 다음 구현 범위
 
 - PDF, DOCX, XLSX 서버 파서
-- Supabase Auth, private Storage, PostgreSQL 메타데이터 영속화
+- Supabase Auth와 실제 업로드·메타데이터 영속화 API
 - 임베딩 공급자와 Qdrant 실제 색인·검색 API
 - 검색 결과를 근거로 하는 LLM 답변 스트리밍
 - Vercel·Supabase·Qdrant Cloud 환경 연결

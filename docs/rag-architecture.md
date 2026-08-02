@@ -112,8 +112,9 @@ flowchart LR
 ## 구현 순서
 
 - 완료: 새 UI, MD/HTML/TXT 정규화, 단어 청킹, 로컬 검색·출처 흐름
-- 진행: Supabase/Qdrant 서버 어댑터와 환경 계약
-- 다음: Supabase CLI 마이그레이션, 인증·private Storage, 실제 업로드 API
+- 완료: Supabase/Qdrant 서버 어댑터와 환경 계약
+- 완료: Supabase 문서·버전·청크 마이그레이션, RLS, private Storage bucket
+- 다음: Supabase Auth와 실제 업로드·메타데이터 영속화 API
 - 다음: PDF/DOCX/XLSX 파서와 임베딩 공급자
 - 다음: Qdrant 색인·검색, 근거 기반 LLM 스트리밍
 - 마지막: Vercel·Supabase·Qdrant Cloud 연결과 브라우저 E2E

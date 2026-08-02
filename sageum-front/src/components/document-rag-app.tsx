@@ -25,14 +25,13 @@ import {
 } from 'lucide-react';
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { logoutAction } from '@/app/actions';
-import { chunkDocument } from '@/lib/rag/chunker';
+import { uploadAndProcessDocument } from '@/lib/documents/browser-upload';
 import {
   composeExtractiveAnswer,
   searchDocuments,
   type IndexedDocument,
   type SourceReference,
 } from '@/lib/rag/local-search';
-import { parseBrowserFile } from '@/lib/rag/parser';
 
 type View = 'chat' | 'documents' | 'upload';
 
@@ -59,105 +58,6 @@ const SUPPORTED_TYPES = [
   { label: 'PDF', extension: 'PDF', ready: false },
   { label: 'Word', extension: 'DOCX', ready: false },
   { label: 'Excel', extension: 'XLSX', ready: false },
-];
-
-const DEMO_DOCUMENTS: IndexedDocument[] = [
-  {
-    document: {
-      id: '550e8400-e29b-41d4-a716-446655440001',
-      versionId: '550e8400-e29b-41d4-a716-446655440011',
-      name: '재택근무_운영가이드.md',
-      title: '재택근무 운영 가이드',
-      mimeType: 'text/markdown',
-      sourceType: 'markdown',
-      sizeBytes: 28_400,
-      blocks: [],
-    },
-    chunks: [
-      {
-        id: 'demo-remote-1',
-        documentId: '550e8400-e29b-41d4-a716-446655440001',
-        versionId: '550e8400-e29b-41d4-a716-446655440011',
-        ordinal: 0,
-        text: '재택근무는 주 2회까지 신청할 수 있으며, 팀 리더의 사전 승인이 필요합니다. 신청은 근무일 기준 하루 전 오후 3시까지 협업 시스템에 등록합니다.',
-        wordCount: 24,
-        headingPath: ['근무 신청', '신청 기준'],
-        blockStart: 0,
-        blockEnd: 1,
-        location: {},
-      },
-      {
-        id: 'demo-remote-2',
-        documentId: '550e8400-e29b-41d4-a716-446655440001',
-        versionId: '550e8400-e29b-41d4-a716-446655440011',
-        ordinal: 1,
-        text: '재택근무 중에는 오전 10시부터 오후 4시까지 코어타임을 준수해야 합니다. 코어타임에는 메신저와 화상회의에 응답할 수 있는 상태를 유지합니다.',
-        wordCount: 22,
-        headingPath: ['근무 원칙', '코어타임'],
-        blockStart: 2,
-        blockEnd: 3,
-        location: {},
-      },
-    ],
-    status: 'ready',
-    indexedAt: '2026-08-02T01:00:00.000Z',
-  },
-  {
-    document: {
-      id: '550e8400-e29b-41d4-a716-446655440002',
-      versionId: '550e8400-e29b-41d4-a716-446655440012',
-      name: '보안_체크리스트.html',
-      title: '사내 문서 보안 체크리스트',
-      mimeType: 'text/html',
-      sourceType: 'html',
-      sizeBytes: 18_900,
-      blocks: [],
-    },
-    chunks: [
-      {
-        id: 'demo-security-1',
-        documentId: '550e8400-e29b-41d4-a716-446655440002',
-        versionId: '550e8400-e29b-41d4-a716-446655440012',
-        ordinal: 0,
-        text: '외부 공유 전에는 문서의 개인정보, 고객 식별자, API 키 포함 여부를 확인합니다. 민감 문서는 공개 링크 대신 만료 시간이 있는 접근 링크를 사용합니다.',
-        wordCount: 25,
-        headingPath: ['외부 공유', '필수 확인'],
-        blockStart: 0,
-        blockEnd: 1,
-        location: {},
-      },
-    ],
-    status: 'ready',
-    indexedAt: '2026-08-02T01:05:00.000Z',
-  },
-  {
-    document: {
-      id: '550e8400-e29b-41d4-a716-446655440003',
-      versionId: '550e8400-e29b-41d4-a716-446655440013',
-      name: '프로젝트_온보딩.txt',
-      title: '프로젝트 온보딩 안내',
-      mimeType: 'text/plain',
-      sourceType: 'text',
-      sizeBytes: 9_600,
-      blocks: [],
-    },
-    chunks: [
-      {
-        id: 'demo-onboarding-1',
-        documentId: '550e8400-e29b-41d4-a716-446655440003',
-        versionId: '550e8400-e29b-41d4-a716-446655440013',
-        ordinal: 0,
-        text: '신규 참여자는 첫날 개발 환경을 설치하고 저장소 접근 권한을 요청합니다. 둘째 날에는 서비스 구조 문서를 읽고 담당자와 아키텍처 리뷰를 진행합니다.',
-        wordCount: 24,
-        headingPath: ['첫 주 체크리스트'],
-        blockStart: 0,
-        blockEnd: 1,
-        location: {},
-      },
-    ],
-    status: 'ready',
-    indexedAt: '2026-08-02T01:10:00.000Z',
-  },
 ];
 
 const INITIAL_MESSAGES: ChatMessage[] = [
@@ -199,13 +99,21 @@ function fileIcon(type: IndexedDocument['document']['sourceType']) {
   return FileText;
 }
 
-export function DocumentRagApp({ userEmail }: { userEmail: string }) {
+export function DocumentRagApp({
+  userEmail,
+  initialDocuments,
+}: {
+  userEmail: string;
+  initialDocuments: IndexedDocument[];
+}) {
   const [view, setView] = useState<View>('chat');
-  const [documents, setDocuments] = useState<IndexedDocument[]>(DEMO_DOCUMENTS);
+  const [documents, setDocuments] = useState<IndexedDocument[]>(() => initialDocuments);
   const [messages, setMessages] = useState<ChatMessage[]>(INITIAL_MESSAGES);
   const [query, setQuery] = useState('');
   const [documentFilter, setDocumentFilter] = useState('');
-  const [selectedDocumentId, setSelectedDocumentId] = useState(DEMO_DOCUMENTS[0].document.id);
+  const [selectedDocumentId, setSelectedDocumentId] = useState(
+    () => initialDocuments[0]?.document.id ?? '',
+  );
   const [activeSources, setActiveSources] = useState<SourceReference[]>([]);
   const [uploadMessage, setUploadMessage] = useState<string | null>(null);
   const [uploadBusy, setUploadBusy] = useState(false);
@@ -250,16 +158,7 @@ export function DocumentRagApp({ userEmail }: { userEmail: string }) {
     setUploadMessage(null);
 
     const results = await Promise.allSettled(
-      files.map(async (file) => {
-        const document = await parseBrowserFile(file);
-        const chunks = chunkDocument(document);
-        return {
-          document,
-          chunks,
-          status: 'ready' as const,
-          indexedAt: new Date().toISOString(),
-        };
-      }),
+      files.map((file) => uploadAndProcessDocument(file)),
     );
 
     const succeeded = results.flatMap((result) => (result.status === 'fulfilled' ? [result.value] : []));
@@ -270,12 +169,17 @@ export function DocumentRagApp({ userEmail }: { userEmail: string }) {
     );
 
     if (succeeded.length) {
-      setDocuments((current) => [...succeeded, ...current]);
+      const uploadedIds = new Set(succeeded.map(({ document }) => document.id));
+      setDocuments((current) => [
+        ...succeeded,
+        ...current.filter(({ document }) => !uploadedIds.has(document.id)),
+      ]);
       setSelectedDocumentId(succeeded[0].document.id);
-      setUploadMessage(`${succeeded.length}개 문서를 구조화하고 청크로 분할했습니다.`);
+      setUploadMessage(`${succeeded.length}개 문서를 Supabase에 저장하고 청크로 분할했습니다.`);
+      setView('documents');
     }
     if (failures.length) {
-      setUploadMessage(failures.join(' '));
+      setUploadMessage(`실패: ${failures.join(' ')}`);
     }
     setUploadBusy(false);
   }
@@ -476,7 +380,13 @@ export function DocumentRagApp({ userEmail }: { userEmail: string }) {
                         <strong>{item.chunks.length} chunks</strong>
                         <small>{formatBytes(item.document.sizeBytes)}</small>
                       </span>
-                      <CheckCircle2 size={17} className="ready-icon" />
+                      {item.status === 'ready' ? (
+                        <CheckCircle2 size={17} className="ready-icon" />
+                      ) : item.status === 'failed' ? (
+                        <XCircle size={17} className="failed-icon" />
+                      ) : (
+                        <LoaderCircle size={17} className="processing-icon spin" />
+                      )}
                     </button>
                   );
                 })}
@@ -556,7 +466,7 @@ export function DocumentRagApp({ userEmail }: { userEmail: string }) {
                     event.target.value = '';
                   }}
                 />
-                <small>현재 브라우저 파서 한도: 파일당 10MB</small>
+                <small>Supabase private Storage · 파일당 최대 10MB</small>
               </div>
 
               {uploadMessage ? (

@@ -3,32 +3,7 @@ import type {
   NormalizedBlock,
   NormalizedDocument,
 } from './types';
-
-const MAX_BROWSER_FILE_SIZE = 10 * 1024 * 1024;
-const SUPPORTED_MIME_TYPES = new Map<string, DocumentSourceType>([
-  ['text/markdown', 'markdown'],
-  ['text/x-markdown', 'markdown'],
-  ['text/html', 'html'],
-  ['text/plain', 'text'],
-]);
-
-const EXTENSION_TYPES = new Map<string, DocumentSourceType>([
-  ['md', 'markdown'],
-  ['markdown', 'markdown'],
-  ['html', 'html'],
-  ['htm', 'html'],
-  ['txt', 'text'],
-  ['pdf', 'pdf'],
-  ['docx', 'docx'],
-  ['xlsx', 'xlsx'],
-]);
-
-export class UnsupportedDocumentError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'UnsupportedDocumentError';
-  }
-}
+import { validateDocumentMetadata } from '@/lib/documents/validation';
 
 function createId() {
   const uuid = globalThis.crypto?.randomUUID?.();
@@ -38,15 +13,6 @@ function createId() {
     const value = token === 'x' ? random : (random & 0x3) | 0x8;
     return value.toString(16);
   });
-}
-
-function extensionOf(name: string) {
-  const dot = name.lastIndexOf('.');
-  return dot >= 0 ? name.slice(dot + 1).toLowerCase() : '';
-}
-
-function detectSourceType(name: string, mimeType: string): DocumentSourceType {
-  return SUPPORTED_MIME_TYPES.get(mimeType) ?? EXTENSION_TYPES.get(extensionOf(name)) ?? 'text';
 }
 
 function pushBlock(
@@ -185,19 +151,40 @@ function buildDocument(
 }
 
 export async function parseBrowserFile(file: File): Promise<NormalizedDocument> {
-  if (file.size > MAX_BROWSER_FILE_SIZE) {
-    throw new Error('개인 데모에서는 파일당 10MB까지 처리합니다.');
-  }
-
-  const sourceType = detectSourceType(file.name, file.type);
-  if (sourceType === 'pdf' || sourceType === 'docx' || sourceType === 'xlsx') {
-    throw new UnsupportedDocumentError(
-      `${sourceType.toUpperCase()} 파서는 다음 구현 단계에서 연결됩니다. 현재는 Markdown, HTML, TXT를 사용할 수 있습니다.`,
-    );
-  }
-
+  const metadata = validateDocumentMetadata({
+    name: file.name,
+    mimeType: file.type,
+    sizeBytes: file.size,
+  });
   const source = await file.text();
-  if (sourceType === 'html') return normalizeHtmlSource(source, file.name, file.type || 'text/html');
-  if (sourceType === 'markdown') return normalizeMarkdownSource(source, file.name, file.type || 'text/markdown');
-  return normalizeTextSource(source, file.name, file.type || 'text/plain');
+  return parseTextDocumentSource(source, metadata);
+}
+
+export function parseTextDocumentSource(
+  source: string,
+  input: {
+    name: string;
+    mimeType: string;
+    sizeBytes: number;
+    documentId?: string;
+    versionId?: string;
+  },
+) {
+  const metadata = validateDocumentMetadata(input);
+  let document: NormalizedDocument;
+
+  if (metadata.sourceType === 'html') {
+    document = normalizeHtmlSource(source, metadata.name, metadata.mimeType);
+  } else if (metadata.sourceType === 'markdown') {
+    document = normalizeMarkdownSource(source, metadata.name, metadata.mimeType);
+  } else {
+    document = normalizeTextSource(source, metadata.name, metadata.mimeType);
+  }
+
+  return {
+    ...document,
+    id: input.documentId ?? document.id,
+    versionId: input.versionId ?? document.versionId,
+    sizeBytes: metadata.sizeBytes,
+  };
 }

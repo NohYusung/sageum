@@ -1218,6 +1218,14 @@ svg {
   color: #62a17e;
 }
 
+.failed-icon {
+  color: var(--danger);
+}
+
+.processing-icon {
+  color: var(--amber);
+}
+
 .document-list-empty {
   display: grid;
   min-height: 210px;

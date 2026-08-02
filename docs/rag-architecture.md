@@ -12,8 +12,10 @@
 
 ```mermaid
 flowchart LR
-  U["Browser"] -->|"upload / query"| V["Vercel Next.js"]
-  V -->|"original file"| S["Supabase private Storage"]
+  U["Browser"] -->|"upload ticket / query"| V["Vercel Next.js"]
+  V -->|"signed upload token"| U
+  U -->|"original file direct upload"| S["Supabase private Storage"]
+  V -->|"authenticated download"| S
   V -->|"metadata / status"| P["Supabase PostgreSQL"]
   V -->|"embedding + payload"| Q["Qdrant Cloud"]
   V -->|"embedding / grounded answer"| E["Model provider"]
@@ -22,7 +24,8 @@ flowchart LR
 ```
 
 - 브라우저는 Supabase publishable key만 가진다.
-- 파일 파싱, 임베딩, Qdrant 접근, 관리자 저장 작업은 Next.js Node.js Route Handler에서 수행한다.
+- 파일 원본은 Vercel 요청 본문을 통과하지 않고 signed upload URL로 Storage에 직접 전송한다.
+- 파일 파싱, 임베딩, Qdrant 접근, 사용자 소유 데이터 저장은 Next.js Node.js Route Handler에서 수행한다.
 - Vercel 함수 제한을 넘는 대형 비동기 작업은 개인 데모 범위에서 제외하고 파일당 10MB로 제한한다.
 
 ## 저장 책임
@@ -32,7 +35,7 @@ flowchart LR
 - bucket: `documents`
 - public: `false`
 - object path: `{owner_id}/{document_id}/{version_id}/{original_filename}`
-- 다운로드는 인증된 사용자에 대한 signed URL로만 제공한다.
+- 처리는 사용자 세션과 RLS를 적용한 서버 다운로드를 사용하고, 사용자 다운로드 링크는 signed URL로 제공한다.
 
 ### Supabase PostgreSQL
 
@@ -76,13 +79,14 @@ flowchart LR
 ## 수집 파이프라인
 
 1. 인증과 파일 크기·확장자·MIME를 검증한다.
-2. 원본을 private Storage에 업로드하고 `uploaded` 버전을 만든다.
-3. 형식별 파서로 `NormalizedDocument`와 위치 정보를 가진 block을 만든다.
-4. block 경계를 우선해 단어 수 기준 청크를 만든다.
-5. 청크를 배치 임베딩한다.
-6. Qdrant 컬렉션·payload index를 확인하고 point를 upsert한다.
-7. PostgreSQL 청크 메타데이터를 저장하고 버전을 `ready`로 전환한다.
-8. 중간 실패 시 버전을 `failed`로 표시하고 기존 ready 버전은 검색 가능 상태로 유지한다.
+2. `uploaded` 버전과 사용자 경로로 제한된 signed upload URL을 만든다.
+3. 브라우저가 원본을 private Storage에 직접 업로드한다.
+4. 형식별 파서로 `NormalizedDocument`와 위치 정보를 가진 block을 만든다.
+5. block 경계를 우선해 단어 수 기준 청크를 만든다.
+6. 청크를 배치 임베딩한다.
+7. Qdrant 컬렉션·payload index를 확인하고 point를 upsert한다.
+8. PostgreSQL 청크 메타데이터를 저장하고 버전을 `ready`로 전환한다.
+9. 중간 실패 시 버전을 `failed`로 표시하고 기존 ready 버전은 검색 가능 상태로 유지한다.
 
 ## 검색·답변 계약
 
@@ -114,7 +118,7 @@ flowchart LR
 - 완료: 새 UI, MD/HTML/TXT 정규화, 단어 청킹, 로컬 검색·출처 흐름
 - 완료: Supabase/Qdrant 서버 어댑터와 환경 계약
 - 완료: Supabase 문서·버전·청크 마이그레이션, RLS, private Storage bucket
-- 다음: Supabase Auth와 실제 업로드·메타데이터 영속화 API
+- 완료: Supabase Auth, signed direct upload, 서버 파싱·청킹, 메타데이터 영속화
 - 다음: PDF/DOCX/XLSX 파서와 임베딩 공급자
 - 다음: Qdrant 색인·검색, 근거 기반 LLM 스트리밍
 - 마지막: Vercel·Supabase·Qdrant Cloud 연결과 브라우저 E2E

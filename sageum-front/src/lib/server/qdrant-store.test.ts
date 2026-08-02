@@ -119,7 +119,7 @@ test('청크 위치를 payload로 저장하고 소유자·문서 필터로 검�
     ownerId: '123e4567-e89b-42d3-a456-426614174010',
     sourceType: 'pdf',
     documentTitle: '운영 가이드',
-    embeddingModel: 'sentence-transformers/all-minilm-l6-v2',
+    embeddingModel: 'intfloat/multilingual-e5-small',
   }]);
   const upsert = fake.upserts[0] as {
     points: Array<{
@@ -131,9 +131,13 @@ test('청크 위치를 payload로 저장하고 소유자·문서 필터로 검�
   assert.equal(upsert.points[0].payload.cell_range, 'A1:B2');
   assert.equal(
     upsert.points[0].vector.dense.model,
-    'sentence-transformers/all-minilm-l6-v2',
+    'intfloat/multilingual-e5-small',
   );
-  assert.match(upsert.points[0].vector.dense.text, /운영 가이드.*신청 기준.*재택근무/su);
+  assert.match(
+    upsert.points[0].vector.dense.text,
+    /^passage: 운영 가이드.*신청 기준.*재택근무/su,
+  );
+  assert.match(upsert.points[0].vector.bm25.text, /^운영 가이드.*신청 기준.*재택근무/su);
   assert.equal(upsert.points[0].vector.bm25.model, 'qdrant/bm25');
   assert.equal(upsert.points[0].vector.bm25.options?.tokenizer, 'multilingual');
 
@@ -144,7 +148,7 @@ test('청크 위치를 payload로 저장하고 소유자·문서 필터로 검�
       documentIds: [CHUNK.documentId],
       limit: 8,
       scoreThreshold: 0.45,
-      embeddingModel: 'sentence-transformers/all-minilm-l6-v2',
+      embeddingModel: 'intfloat/multilingual-e5-small',
     },
   );
   const query = fake.queries[0] as {
@@ -164,7 +168,8 @@ test('청크 위치를 payload로 저장하고 소유자·문서 필터로 검�
   assert.equal(query.limit, 8);
   assert.equal(query.score_threshold, 0.45);
   assert.deepEqual(query.prefetch.map(({ using }) => using), ['dense', 'bm25']);
-  assert.equal(query.prefetch[0].query.text, '재택근무 기준');
+  assert.equal(query.prefetch[0].query.text, 'query: 재택근무 기준');
+  assert.equal(query.prefetch[1].query.text, '재택근무 기준');
   assert.equal(query.prefetch[1].query.options?.tokenizer, 'multilingual');
   assert.equal(query.query.fusion, 'rrf');
   assert.equal(results[0].documentTitle, '운영 가이드');

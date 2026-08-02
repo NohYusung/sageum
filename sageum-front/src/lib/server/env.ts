@@ -1,6 +1,6 @@
-export const DEFAULT_QDRANT_INFERENCE_MODEL = 'sentence-transformers/all-minilm-l6-v2';
+export const DEFAULT_QDRANT_INFERENCE_MODEL = 'intfloat/multilingual-e5-small';
 export const DEFAULT_QDRANT_INFERENCE_DIMENSIONS = 384;
-export const DEFAULT_QDRANT_COLLECTION = 'document_chunks_qdrant_hybrid_v1';
+export const DEFAULT_QDRANT_COLLECTION = 'document_chunks_qdrant_hybrid_v2';
 
 export type ProviderConfiguration = {
   supabase: {

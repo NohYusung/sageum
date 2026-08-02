@@ -15,43 +15,61 @@ async function main() {
   const ownerId = randomUUID();
   const documentId = randomUUID();
   const versionId = randomUUID();
-  const chunk: DocumentChunk = {
+  const targetChunk: DocumentChunk = {
     id: `qdrant-smoke-${randomUUID()}`,
     documentId,
     versionId,
     ordinal: 0,
-    text: 'Qdrant Cloud 연결을 확인하기 위한 임시 검색 청크입니다.',
-    wordCount: 8,
-    headingPath: ['Qdrant smoke test'],
+    text: '직원은 일주일에 이틀까지 자택에서 근무할 수 있습니다.',
+    wordCount: 7,
+    headingPath: ['근무 제도'],
     blockStart: 0,
     blockEnd: 0,
     location: {},
   };
+  const distractorChunks: DocumentChunk[] = [
+    {
+      ...targetChunk,
+      id: `qdrant-smoke-${randomUUID()}`,
+      ordinal: 1,
+      text: '출장비는 영수증을 제출한 뒤 정산합니다.',
+      wordCount: 5,
+      headingPath: ['출장비'],
+    },
+    {
+      ...targetChunk,
+      id: `qdrant-smoke-${randomUUID()}`,
+      ordinal: 2,
+      text: '신입 직원의 수습 기간은 입사일부터 석 달입니다.',
+      wordCount: 7,
+      headingPath: ['수습 기간'],
+    },
+  ];
   const store = getQdrantVectorStore();
 
   await store.ensureCollection(providers.embedding.dimensions);
   try {
-    await store.upsert([{
+    await store.upsert([targetChunk, ...distractorChunks].map((chunk) => ({
       chunk,
       ownerId,
       sourceType: 'text',
-      documentTitle: 'Qdrant smoke test',
+      documentTitle: '한국어 사내 규정',
       embeddingModel: providers.embedding.model,
-    }]);
-    const results = await store.query('Qdrant Cloud 연결 확인', ownerId, {
+    })));
+    const results = await store.query('재택근무는 주 몇 회 가능한가요?', ownerId, {
       documentIds: [documentId],
       embeddingModel: providers.embedding.model,
-      limit: 1,
+      limit: 3,
       scoreThreshold: 0.2,
     });
-    if (results.length !== 1 || results[0].chunkId !== chunk.id) {
-      throw new Error('Qdrant 소유자·모델·문서 필터 검색 결과가 예상과 다릅니다.');
+    if (!results.length || results[0].chunkId !== targetChunk.id) {
+      throw new Error('한국어 유사어 질문이 예상 청크를 1위로 검색하지 못했습니다.');
     }
   } finally {
     await store.deleteByVersion(ownerId, versionId);
   }
 
-  const deletedResults = await store.query('Qdrant Cloud 연결 확인', ownerId, {
+  const deletedResults = await store.query('재택근무는 주 몇 회 가능한가요?', ownerId, {
     documentIds: [documentId],
     embeddingModel: providers.embedding.model,
     limit: 1,
@@ -62,7 +80,7 @@ async function main() {
   }
 
   console.log(
-    `Qdrant Cloud Inference 스모크 테스트 통과: '${providers.qdrant.collection}' 임베딩·하이브리드 검색·소유자 필터·삭제 정상.`,
+    `Qdrant Cloud Inference 스모크 테스트 통과: '${providers.qdrant.collection}' 한국어 유사어 임베딩·하이브리드 검색·소유자 필터·삭제 정상.`,
   );
 }
 

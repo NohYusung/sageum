@@ -56,6 +56,7 @@ const PAYLOAD_INDEXES = [
 export const QDRANT_DENSE_VECTOR_NAME = 'dense';
 export const QDRANT_SPARSE_VECTOR_NAME = 'bm25';
 export const QDRANT_BM25_MODEL = 'qdrant/bm25';
+export const QDRANT_MULTILINGUAL_E5_MODEL = 'intfloat/multilingual-e5-small';
 const QDRANT_INFERENCE_BATCH_SIZE = 8;
 const QDRANT_BM25_OPTIONS = {
   language: 'none',
@@ -109,6 +110,14 @@ export function chunkInferenceText(documentTitle: string, chunk: DocumentChunk) 
     chunk.headingPath.join(' › '),
     chunk.text.trim(),
   ].filter(Boolean).join('\n');
+}
+
+export function densePassageInferenceText(model: string, text: string) {
+  return model === QDRANT_MULTILINGUAL_E5_MODEL ? `passage: ${text}` : text;
+}
+
+export function denseQueryInferenceText(model: string, text: string) {
+  return model === QDRANT_MULTILINGUAL_E5_MODEL ? `query: ${text}` : text;
 }
 
 export class QdrantConfigurationError extends Error {
@@ -187,7 +196,7 @@ export class QdrantVectorStore {
               id: deterministicUuid(chunk.id),
               vector: {
                 [QDRANT_DENSE_VECTOR_NAME]: {
-                  text: inferenceText,
+                  text: densePassageInferenceText(embeddingModel, inferenceText),
                   model: embeddingModel,
                 },
                 [QDRANT_SPARSE_VECTOR_NAME]: {
@@ -246,7 +255,10 @@ export class QdrantVectorStore {
       response = await this.client.query(this.collectionName, {
         prefetch: [
           {
-            query: { text: normalizedText, model: options.embeddingModel },
+            query: {
+              text: denseQueryInferenceText(options.embeddingModel, normalizedText),
+              model: options.embeddingModel,
+            },
             using: QDRANT_DENSE_VECTOR_NAME,
             filter,
             limit: Math.max(limit * 3, 20),

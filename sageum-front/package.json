@@ -12,6 +12,7 @@
     "test": "tsx --test 'src/**/*.test.ts'",
     "typecheck": "tsc --noEmit",
     "qdrant:setup": "node --env-file=.env.local --import tsx scripts/setup-qdrant.ts",
+    "qdrant:reindex": "node --env-file=.env.local --import tsx scripts/reindex-qdrant.ts",
     "qdrant:smoke": "node --env-file=.env.local --import tsx scripts/smoke-qdrant.ts"
   },
   "dependencies": {

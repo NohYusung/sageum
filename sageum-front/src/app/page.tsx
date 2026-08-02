@@ -1,5 +1,5 @@
-import { SageumApp } from '@/components/sageum-app';
+import { DocumentRagApp } from '@/components/document-rag-app';
 
 export default function Home() {
-  return <SageumApp />;
+  return <DocumentRagApp />;
 }

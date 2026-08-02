@@ -51,7 +51,7 @@ sageum-agent codex-auth-status
 - `sageum-back/`: NestJS + TypeScript + TypeORM backend. It owns the local durable job table and forwards work to `sageum-agent serve`.
 - Default local ports:
   - frontend: `http://localhost:3000`
-  - backend: `http://127.0.0.1:4000`
+  - backend: `http://localhost:4000`
   - agent worker: `http://127.0.0.1:4123`
 
 ```bash
@@ -69,7 +69,7 @@ npm install
 npm run dev
 ```
 
-- Frontend calls `NEXT_PUBLIC_SAGEUM_API_URL`, default `http://127.0.0.1:4000`.
+- Frontend calls `NEXT_PUBLIC_SAGEUM_API_URL`, default `http://localhost:4000`.
 - Backend calls `SAGEUM_AGENT_URL`, default `http://127.0.0.1:4123`.
 - Backend stores job rows in `../data/sageum-back.sqlite` by default.
 

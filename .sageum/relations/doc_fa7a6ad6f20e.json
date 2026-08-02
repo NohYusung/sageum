@@ -1,0 +1,135 @@
+{
+  "document_id": "doc_fa7a6ad6f20e",
+  "relations": [
+    {
+      "relation_id": "rel_1bc4ae3826e5",
+      "source_concept_id": "concept_jungle_role",
+      "relation_type": "performs",
+      "target_concept_id": "concept_ganking",
+      "evidence_text": "정글러는 단순히 몬스터를 사냥하는 것이 아니라 갱킹, 오브젝트 컨트롤, 맵 장악력을 담당해야 합니다.",
+      "confidence": 0.97,
+      "status": "candidate",
+      "created_by": "sageum-agent"
+    },
+    {
+      "relation_id": "rel_3829bddf0016",
+      "source_concept_id": "concept_jungle_role",
+      "relation_type": "controls",
+      "target_concept_id": "concept_objective_control",
+      "evidence_text": "정글러는 단순히 몬스터를 사냥하는 것이 아니라 갱킹, 오브젝트 컨트롤, 맵 장악력을 담당해야 합니다.",
+      "confidence": 0.97,
+      "status": "candidate",
+      "created_by": "sageum-agent"
+    },
+    {
+      "relation_id": "rel_7e1f0756b868",
+      "source_concept_id": "concept_jungle_role",
+      "relation_type": "uses",
+      "target_concept_id": "concept_vision_control",
+      "evidence_text": "맵 시야 장악 – 와드 및 상대 정글 동선 체크",
+      "confidence": 0.96,
+      "status": "candidate",
+      "created_by": "sageum-agent"
+    },
+    {
+      "relation_id": "rel_57dd43c8ea0a",
+      "source_concept_id": "concept_jungle_pathing",
+      "relation_type": "enables",
+      "target_concept_id": "concept_ganking",
+      "evidence_text": "정글 동선을 잘 짜면 초반부터 라인전과 오브젝트 싸움에서 이득을 볼 수 있습니다.",
+      "confidence": 0.93,
+      "status": "candidate",
+      "created_by": "sageum-agent"
+    },
+    {
+      "relation_id": "rel_1e30027936fc",
+      "source_concept_id": "concept_jungle_pathing",
+      "relation_type": "prepares",
+      "target_concept_id": "concept_scuttle_crab",
+      "evidence_text": "성장형 정글러라면 '풀 캠프' 동선을 선택하되, 3분 30초 바위게 생성 타이밍에 맞춰 캠프를 마무리하는 속도가 핵심입니다.",
+      "confidence": 0.95,
+      "status": "candidate",
+      "created_by": "sageum-agent"
+    },
+    {
+      "relation_id": "rel_71f8ffaa2533",
+      "source_concept_id": "concept_smite",
+      "relation_type": "affects",
+      "target_concept_id": "concept_scuttle_crab",
+      "evidence_text": "강타 사용 타이밍을 조절하여 바위게 싸움에서 유리한 고지를 점해야 하며",
+      "confidence": 0.92,
+      "status": "candidate",
+      "created_by": "sageum-agent"
+    },
+    {
+      "relation_id": "rel_394fd5467337",
+      "source_concept_id": "concept_lane_priority",
+      "relation_type": "enables",
+      "target_concept_id": "concept_objective_control",
+      "evidence_text": "아군 미드 라이너가 라인을 밀어준다면 금상첨화입니다.",
+      "confidence": 0.9,
+      "status": "candidate",
+      "created_by": "sageum-agent"
+    },
+    {
+      "relation_id": "rel_0cd6c8edb707",
+      "source_concept_id": "concept_objective_control",
+      "relation_type": "includes",
+      "target_concept_id": "concept_dragon",
+      "evidence_text": "드래곤, 전령, 바론 등 주요 오브젝트를 컨트롤하는 것은 팀의 성장에 큰 영향을 미칩니다.",
+      "confidence": 0.98,
+      "status": "candidate",
+      "created_by": "sageum-agent"
+    },
+    {
+      "relation_id": "rel_eb997730efa8",
+      "source_concept_id": "concept_objective_control",
+      "relation_type": "includes",
+      "target_concept_id": "concept_baron",
+      "evidence_text": "바론: 20분 이후 등장 – 한타 승리 시 필수",
+      "confidence": 0.97,
+      "status": "candidate",
+      "created_by": "sageum-agent"
+    },
+    {
+      "relation_id": "rel_5535ce5e0ae8",
+      "source_concept_id": "concept_objective_control",
+      "relation_type": "includes",
+      "target_concept_id": "concept_voidgrubs",
+      "evidence_text": "5분에 생성되는 공허 유충과 6분 전후의 첫 드래곤은 정글러에게 큰 시험대입니다.",
+      "confidence": 0.96,
+      "status": "candidate",
+      "created_by": "sageum-agent"
+    },
+    {
+      "relation_id": "rel_6ecc131f1cb3",
+      "source_concept_id": "concept_vision_control",
+      "relation_type": "supports",
+      "target_concept_id": "concept_enemy_jungle_tracking",
+      "evidence_text": "와드를 활용하여 상대 정글 동선 파악",
+      "confidence": 0.96,
+      "status": "candidate",
+      "created_by": "sageum-agent"
+    },
+    {
+      "relation_id": "rel_60dcb5cf6ee9",
+      "source_concept_id": "concept_counter_jungling",
+      "relation_type": "disrupts",
+      "target_concept_id": "concept_enemy_jungle_tracking",
+      "evidence_text": "카운터 정글링 – 상대 정글을 압박하여 성장 차이 만들기",
+      "confidence": 0.9,
+      "status": "candidate",
+      "created_by": "sageum-agent"
+    },
+    {
+      "relation_id": "rel_f5d09d4b4f22",
+      "source_concept_id": "concept_replay_review",
+      "relation_type": "improves",
+      "target_concept_id": "concept_jungle_pathing",
+      "evidence_text": "리플레이 분석을 통한 실력 향상",
+      "confidence": 0.88,
+      "status": "candidate",
+      "created_by": "sageum-agent"
+    }
+  ]
+}

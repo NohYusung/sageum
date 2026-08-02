@@ -4,6 +4,7 @@ import { mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { AgentJobModule } from './agent/agent-job.module';
 import { HealthController } from './health.controller';
+import { VaultModule } from './vault/vault.module';
 
 function databasePath() {
   const configured = process.env.SAGEUM_BACK_DB_PATH ?? '../data/sageum-back.sqlite';
@@ -21,6 +22,7 @@ function databasePath() {
       synchronize: process.env.SAGEUM_BACK_DB_SYNC !== 'false',
     }),
     AgentJobModule,
+    VaultModule,
   ],
   controllers: [HealthController],
 })

@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse
 from .codex_client import codex_auth_status
 from .contracts import JobRequest, JobResult
 from .curriculum import generate_curriculum
+from .rendering import render_obsidian_frontmatter, render_obsidian_markdown
 from .settings import load_settings
 
 
@@ -54,11 +55,18 @@ async def create_job(request: Request) -> JSONResponse:
 async def _run_job(job: JobRequest) -> None:
     try:
         generated = await generate_curriculum(job.topic)
+        curriculum = generated["curriculum"]
         result = JobResult.completed(
             job_id=job.job_id,
-            markdown=generated["markdown"],
+            markdown=render_obsidian_markdown(curriculum),
             html=generated["html"],
             sources=generated.get("sources", []),
+            obsidian_frontmatter={"raw": render_obsidian_frontmatter(curriculum)},
+            concepts=curriculum.get("concepts", []),
+            mentions=curriculum.get("mentions", []),
+            relations=curriculum.get("relations", []),
+            source_links=curriculum.get("sources", generated.get("sources", [])),
+            suggested_filename=f"{curriculum.get('topic') or job.topic}.md",
             cache_hit=False,
         )
     except Exception as exc:

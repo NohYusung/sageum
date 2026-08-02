@@ -6,6 +6,8 @@
     "dev": "nest start --watch",
     "build": "nest build",
     "start": "node dist/main.js",
+    "test:agent": "ts-node test/agent-job.service.test.ts",
+    "test:vault": "ts-node test/vault.service.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

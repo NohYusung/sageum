@@ -55,6 +55,6 @@ description: "~/sageum-agent/data 아래에 개념 노트나 레퍼런스 노트
 
 예시:
 
-- `/Users/nes0903/Documents/study/webhook/webhook.md`
-- `/Users/nes0903/Documents/study/oauth/oauth.md`
-- `/Users/nes0903/Documents/study/ietf/ietf.md`
+- `~/sageum_agent/skills/study-note-writer/references/cross-origin-policy.md`
+- `~/sageum_agent/skills/study-note-writer/references/dependency-injection.md`
+- `~/sageum_agent/skills/study-note-writer/references/electron.md`

@@ -62,6 +62,30 @@ export class AgentJobCallbackDto {
   @IsOptional()
   rawResult?: Record<string, unknown>;
 
+  @IsObject()
+  @IsOptional()
+  obsidianFrontmatter?: Record<string, unknown>;
+
+  @IsArray()
+  @IsOptional()
+  concepts?: Array<Record<string, unknown>>;
+
+  @IsArray()
+  @IsOptional()
+  mentions?: Array<Record<string, unknown>>;
+
+  @IsArray()
+  @IsOptional()
+  relations?: Array<Record<string, unknown>>;
+
+  @IsArray()
+  @IsOptional()
+  sourceLinks?: Array<Record<string, unknown>>;
+
+  @IsString()
+  @IsOptional()
+  suggestedFilename?: string;
+
   @IsBoolean()
   @IsOptional()
   cacheHit?: boolean;

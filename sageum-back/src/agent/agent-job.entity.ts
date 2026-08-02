@@ -46,6 +46,9 @@ export class AgentJob {
   @Column({ type: 'simple-json', nullable: true })
   rawResult!: Record<string, unknown> | null;
 
+  @Column({ type: 'simple-json', nullable: true })
+  semanticMetadata!: Record<string, unknown> | null;
+
   @Column({ type: 'boolean', default: false })
   cacheHit!: boolean;
 

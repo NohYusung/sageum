@@ -1,0 +1,121 @@
+{
+  "document_id": "doc_fa7a6ad6f20e",
+  "file": "10_Notes/리그오브레전드 정글 잘하는 방법 2.md",
+  "content_hash": "sha256:12a3ea527ae1116eaffd618849f7e7c16ef83704fe2d216b618c660fccaa49d3",
+  "mentions": [
+    {
+      "text": "정글러는 단순히 몬스터를 사냥하는 포지션이 아니라",
+      "concept_id": "concept_jungle_role",
+      "heading": "1. 한 줄 요약",
+      "confidence": 0.98
+    },
+    {
+      "text": "초반 동선으로 성장과 갱킹 각을 만들고",
+      "concept_id": "concept_jungle_pathing",
+      "heading": "1. 한 줄 요약",
+      "confidence": 0.97
+    },
+    {
+      "text": "라인 주도권과 시야를 바탕으로 오브젝트를 준비하며",
+      "concept_id": "concept_lane_priority",
+      "heading": "1. 한 줄 요약",
+      "confidence": 0.95
+    },
+    {
+      "text": "오브젝트를 준비하며",
+      "concept_id": "concept_objective_control",
+      "heading": "1. 한 줄 요약",
+      "confidence": 0.94
+    },
+    {
+      "text": "상대 정글의 위치를 추적해",
+      "concept_id": "concept_enemy_jungle_tracking",
+      "heading": "1. 한 줄 요약",
+      "confidence": 0.96
+    },
+    {
+      "text": "갱킹으로 라인전을 돕고",
+      "concept_id": "concept_ganking",
+      "heading": "2. 왜 중요한가",
+      "confidence": 0.94
+    },
+    {
+      "text": "드래곤·공허 유충·전령·바론 같은 오브젝트를 관리하며",
+      "concept_id": "concept_objective_control",
+      "heading": "2. 왜 중요한가",
+      "confidence": 0.97
+    },
+    {
+      "text": "와드와 동선 예측으로 상대 정글을 압박한다",
+      "concept_id": "concept_vision_control",
+      "heading": "2. 왜 중요한가",
+      "confidence": 0.91
+    },
+    {
+      "text": "정글 동선은 어떤 캠프를 어떤 순서로 돌며",
+      "concept_id": "concept_jungle_pathing",
+      "heading": "3. 핵심 개념",
+      "confidence": 0.99
+    },
+    {
+      "text": "라인 주도권은 아군 라이너가 먼저 움직일 수 있는 상태인지",
+      "concept_id": "concept_lane_priority",
+      "heading": "3. 핵심 개념",
+      "confidence": 0.99
+    },
+    {
+      "text": "상대 정글 추적은 시작 위치, CS, 버프, 갱킹 위치를 보고",
+      "concept_id": "concept_enemy_jungle_tracking",
+      "heading": "3. 핵심 개념",
+      "confidence": 0.98
+    },
+    {
+      "text": "시야 장악은 와드와 렌즈로 안전한 움직임과 오브젝트 준비를 만드는 과정",
+      "concept_id": "concept_vision_control",
+      "heading": "3. 핵심 개념",
+      "confidence": 0.98
+    },
+    {
+      "text": "바위게 타이밍에는 라인 주도권과 챔피언 교전력을 보고",
+      "concept_id": "concept_scuttle_crab",
+      "heading": "4. 아키텍처 또는 흐름",
+      "confidence": 0.95
+    },
+    {
+      "text": "5~6분 전후에는 공허 유충과 첫 드래곤 같은 오브젝트를 준비",
+      "concept_id": "concept_voidgrubs",
+      "heading": "4. 아키텍처 또는 흐름",
+      "confidence": 0.93
+    },
+    {
+      "text": "첫 드래곤 같은 오브젝트를 준비",
+      "concept_id": "concept_dragon",
+      "heading": "4. 아키텍처 또는 흐름",
+      "confidence": 0.93
+    },
+    {
+      "text": "중후반에는 바론, 드래곤 영혼, 장로 드래곤 같은 큰 오브젝트",
+      "concept_id": "concept_baron",
+      "heading": "4. 아키텍처 또는 흐름",
+      "confidence": 0.94
+    },
+    {
+      "text": "카운터 정글은 상대 성장을 막지만",
+      "concept_id": "concept_counter_jungling",
+      "heading": "5. 중요한 세부사항, edge case, tradeoff",
+      "confidence": 0.96
+    },
+    {
+      "text": "강타, 시야, 상대 위치를 맞추는 과정",
+      "concept_id": "concept_smite",
+      "heading": "5. 중요한 세부사항, edge case, tradeoff",
+      "confidence": 0.9
+    },
+    {
+      "text": "매판 리플레이에서 첫 동선, 첫 갱킹 판단",
+      "concept_id": "concept_replay_review",
+      "heading": "7. 용어집 또는 빠른 복습",
+      "confidence": 0.96
+    }
+  ]
+}

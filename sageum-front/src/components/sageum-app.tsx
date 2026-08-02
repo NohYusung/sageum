@@ -16,16 +16,23 @@ import {
 } from 'lucide-react';
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  approveVaultRelation,
   createAgentJob,
   getAgentJob,
+  rejectVaultRelation,
+  saveToVault,
+  searchVault,
   type AgentJob,
   type AgentSource,
+  type SaveToVaultResult,
+  type VaultSearchResponse,
 } from '@/lib/api';
 
 type View = 'input' | 'collect' | 'result';
 type LessonId = 'l1' | 'l2' | 'l3' | 'l4' | 'l5';
 
 const DEFAULT_TOPIC = '트랜스포머 아키텍처가 어떻게 동작하는지 이해하기';
+const LAST_JOB_STORAGE_KEY = 'sageum:lastJobId';
 
 const examples = [
   '트랜스포머 아키텍처의 어텐션 메커니즘',
@@ -124,6 +131,61 @@ function sourceTitle(source: AgentSource, index: number) {
   return source.title || source.snippet || `수집된 소스 ${index + 1}`;
 }
 
+function GeneratedHtml({ html }: { html: string }) {
+  const rootRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function renderMermaid() {
+      const root = rootRef.current;
+      if (!root) return;
+
+      const nodes = Array.from(root.querySelectorAll<HTMLElement>('.mermaid'));
+      if (!nodes.length) return;
+
+      const mermaid = (await import('mermaid')).default;
+      if (cancelled) return;
+
+      mermaid.initialize({
+        startOnLoad: false,
+        securityLevel: 'strict',
+        theme: 'base',
+      });
+
+      for (const [index, node] of nodes.entries()) {
+        const source = node.textContent?.trim() ?? '';
+        if (!source) continue;
+
+        try {
+          const id = `sageum-mermaid-${Date.now()}-${index}`;
+          const { svg } = await mermaid.render(id, source);
+          if (cancelled) return;
+
+          const rendered = document.createElement('div');
+          rendered.className = node.className;
+          rendered.innerHTML = svg;
+          node.replaceWith(rendered);
+        } catch (renderError) {
+          node.classList.add('mermaid-error');
+          node.setAttribute(
+            'data-error',
+            renderError instanceof Error ? renderError.message : 'Mermaid render failed',
+          );
+        }
+      }
+    }
+
+    void renderMermaid();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [html]);
+
+  return <div ref={rootRef} className="generated-html" dangerouslySetInnerHTML={{ __html: html }} />;
+}
+
 export function SageumApp() {
   const [view, setView] = useState<View>('input');
   const [topic, setTopic] = useState('');
@@ -133,11 +195,50 @@ export function SageumApp() {
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
   const [lessonId, setLessonId] = useState<LessonId>('l3');
+  const [vaultSave, setVaultSave] = useState<SaveToVaultResult | null>(null);
+  const [vaultError, setVaultError] = useState<string | null>(null);
+  const [vaultBusy, setVaultBusy] = useState(false);
+  const [vaultQuery, setVaultQuery] = useState('용 언제 먹어야 해?');
+  const [vaultSearch, setVaultSearch] = useState<VaultSearchResponse | null>(null);
+  const [vaultSearchBusy, setVaultSearchBusy] = useState(false);
+  const [relationReview, setRelationReview] = useState<Record<string, 'approved' | 'rejected' | 'candidate' | 'stale'>>({});
+  const [relationBusy, setRelationBusy] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   const activeTopic = topic.trim() || DEFAULT_TOPIC;
   const activeLesson = lessons.find((lesson) => lesson.id === lessonId) ?? lessons[2];
   const isTerminal = job?.status === 'completed' || job?.status === 'failed';
+  const semanticMetadata = job?.semanticMetadata ?? null;
+  const conceptCandidates = useMemo(
+    () => (Array.isArray(semanticMetadata?.concepts) ? semanticMetadata.concepts : []),
+    [semanticMetadata],
+  );
+  const relationCandidates = useMemo(
+    () => (Array.isArray(semanticMetadata?.relations) ? semanticMetadata.relations : []),
+    [semanticMetadata],
+  );
+
+  useEffect(() => {
+    const lastJobId = window.localStorage.getItem(LAST_JOB_STORAGE_KEY);
+    if (!lastJobId) return;
+
+    let cancelled = false;
+    getAgentJob(lastJobId)
+      .then((restored) => {
+        if (cancelled) return;
+        setJob(restored);
+        if (restored.status === 'completed' || restored.status === 'failed') {
+          setProgress(100);
+        }
+      })
+      .catch(() => {
+        window.localStorage.removeItem(LAST_JOB_STORAGE_KEY);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const displaySources = useMemo(() => {
     const sources = job?.sources?.length ? job.sources : demoSources;
@@ -172,6 +273,7 @@ export function SageumApp() {
       try {
         const next = await getAgentJob(job.id);
         setJob(next);
+        window.localStorage.setItem(LAST_JOB_STORAGE_KEY, next.id);
         if (next.status === 'completed') {
           setProgress(100);
           setView('result');
@@ -202,6 +304,7 @@ export function SageumApp() {
         format,
       });
       setJob(created);
+      window.localStorage.setItem(LAST_JOB_STORAGE_KEY, created.id);
 
       if (created.status === 'completed') {
         setProgress(100);
@@ -219,6 +322,61 @@ export function SageumApp() {
 
   function navigate(next: View) {
     setView(next);
+  }
+
+  async function handleSaveToVault() {
+    if (!job?.markdown) return;
+    setVaultBusy(true);
+    setVaultError(null);
+    try {
+      const saved = await saveToVault({
+        jobId: job.id,
+        title: job.topic,
+        markdown: job.markdown,
+        concepts: conceptCandidates,
+        mentions: Array.isArray(semanticMetadata?.mentions) ? semanticMetadata.mentions : [],
+        relations: relationCandidates,
+        sources: semanticMetadata?.sourceLinks?.length ? semanticMetadata.sourceLinks : job.sources ?? [],
+        options: { createConceptNotes: true },
+      });
+      setVaultSave(saved);
+    } catch (saveError) {
+      setVaultError(saveError instanceof Error ? saveError.message : 'Vault 저장에 실패했습니다.');
+    } finally {
+      setVaultBusy(false);
+    }
+  }
+
+  async function handleVaultSearch(event?: FormEvent<HTMLFormElement>) {
+    event?.preventDefault();
+    const query = vaultQuery.trim();
+    if (!query) return;
+    setVaultSearchBusy(true);
+    setVaultError(null);
+    try {
+      const result = await searchVault(query);
+      setVaultSearch(result);
+    } catch (searchError) {
+      setVaultError(searchError instanceof Error ? searchError.message : 'Vault 검색에 실패했습니다.');
+    } finally {
+      setVaultSearchBusy(false);
+    }
+  }
+
+  async function handleReviewRelation(relationId: string, action: 'approve' | 'reject') {
+    setRelationBusy(relationId);
+    setVaultError(null);
+    try {
+      const reviewed = action === 'approve' ? await approveVaultRelation(relationId) : await rejectVaultRelation(relationId);
+      setRelationReview((current) => ({ ...current, [relationId]: reviewed.status }));
+      if (vaultSearch) {
+        await handleVaultSearch();
+      }
+    } catch (reviewError) {
+      setVaultError(reviewError instanceof Error ? reviewError.message : 'relation review 처리에 실패했습니다.');
+    } finally {
+      setRelationBusy(null);
+    }
   }
 
   return (
@@ -388,8 +546,8 @@ export function SageumApp() {
               <button className="btn btn-ghost small" type="button">
                 공유
               </button>
-              <button className="btn btn-primary small" type="button">
-                저장소에 보관
+              <button className="btn btn-primary small" type="button" disabled={!job?.markdown || vaultBusy} onClick={handleSaveToVault}>
+                {vaultBusy ? '저장 중' : 'Obsidian에 저장'}
               </button>
             </header>
 
@@ -416,7 +574,7 @@ export function SageumApp() {
               <article className="note">
                 <div className="note-inner">
                   {job?.status === 'completed' && job.html ? (
-                    <div className="generated-html" dangerouslySetInnerHTML={{ __html: job.html }} />
+                    <GeneratedHtml html={job.html} />
                   ) : job?.status === 'completed' && job.markdown ? (
                     <pre className="markdown-output">{job.markdown}</pre>
                   ) : (
@@ -428,12 +586,105 @@ export function SageumApp() {
               <aside className="source-panel">
                 <div className="save-card">
                   <FileText size={18} />
-                  <strong>이 레슨 학습 노트</strong>
-                  <p>선별된 금 소스에서 정제된 결과를 저장합니다.</p>
-                  <button className="btn btn-primary small" type="button">
-                    노트 저장
+                  <strong>Obsidian Vault</strong>
+                  <p>Markdown, concept note, sidecar를 Vault에 저장하고 index를 갱신합니다.</p>
+                  <button className="btn btn-primary small" type="button" disabled={!job?.markdown || vaultBusy} onClick={handleSaveToVault}>
+                    {vaultBusy ? '저장 중' : 'Obsidian에 저장'}
                   </button>
+                  {vaultSave && (
+                    <div className="vault-status">
+                      <b>{vaultSave.path}</b>
+                      <span>concept {vaultSave.createdConcepts.length}개 · sidecar {vaultSave.sidecars.length}개</span>
+                      {vaultSave.index && (
+                        <span>
+                          index 문서 {vaultSave.index.documentCount}개 · relation {vaultSave.index.relationCount}개
+                        </span>
+                      )}
+                    </div>
+                  )}
+                  {vaultError && <p className="vault-error">{vaultError}</p>}
                 </div>
+
+                <div className="panel-title">
+                  Concept 후보 <span>{conceptCandidates.length}</span>
+                </div>
+                <div className="candidate-list">
+                  {conceptCandidates.slice(0, 5).map((concept, index) => (
+                    <div className="candidate" key={`${String(concept.id ?? concept.name ?? index)}`}>
+                      <strong>{String(concept.name ?? `concept ${index + 1}`)}</strong>
+                      <span>{String(concept.type ?? 'general')}</span>
+                    </div>
+                  ))}
+                  {!conceptCandidates.length && <p className="empty-panel">agent metadata가 아직 없습니다.</p>}
+                </div>
+
+                <div className="panel-title">
+                  Relation 후보 <span>{relationCandidates.length}</span>
+                </div>
+                <div className="candidate-list">
+                  {relationCandidates.slice(0, 4).map((relation, index) => (
+                    <div className="candidate" key={`${String(relation.relation_id ?? relation.source ?? index)}`}>
+                      <strong>
+                        {String(relation.source ?? relation.source_concept_id ?? 'source')} → {String(relation.target ?? relation.target_concept_id ?? 'target')}
+                      </strong>
+                      <span>{relationReview[String(relation.relation_id ?? '')] ?? String(relation.status ?? 'candidate')} · {String(relation.relation_type ?? 'related')}</span>
+                      <div className="relation-actions">
+                        <button
+                          className="btn btn-ghost mini"
+                          type="button"
+                          disabled={!relation.relation_id || relationBusy === relation.relation_id}
+                          onClick={() => void handleReviewRelation(String(relation.relation_id), 'approve')}
+                        >
+                          승인
+                        </button>
+                        <button
+                          className="btn btn-ghost mini danger"
+                          type="button"
+                          disabled={!relation.relation_id || relationBusy === relation.relation_id}
+                          onClick={() => void handleReviewRelation(String(relation.relation_id), 'reject')}
+                        >
+                          거절
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                  {!relationCandidates.length && <p className="empty-panel">relation 후보가 아직 없습니다.</p>}
+                </div>
+
+                <form className="vault-search" onSubmit={handleVaultSearch}>
+                  <label htmlFor="vault-search">Vault 검색</label>
+                  <div>
+                    <input
+                      id="vault-search"
+                      value={vaultQuery}
+                      onChange={(event) => setVaultQuery(event.target.value)}
+                      placeholder="예: 용 언제 먹어야 해?"
+                    />
+                    <button className="icon-button" type="submit" aria-label="Vault 검색" disabled={vaultSearchBusy}>
+                      <Search size={15} />
+                    </button>
+                  </div>
+                </form>
+
+                {vaultSearch && (
+                  <div className="vault-results">
+                    <div className="vault-match">
+                      {vaultSearch.matchedConcepts.map((concept) => (
+                        <span key={concept.id}>{concept.alias ? `${concept.alias} → ${concept.name}` : concept.name}</span>
+                      ))}
+                      {vaultSearch.expandedConcepts.map((concept) => (
+                        <span key={concept}>{concept}</span>
+                      ))}
+                    </div>
+                    {vaultSearch.results.slice(0, 4).map((result) => (
+                      <div className="vault-result" key={`${result.path}-${result.heading}-${result.snippet}`}>
+                        <strong>{result.documentTitle}</strong>
+                        <span>{result.heading || result.path}</span>
+                        <p>{result.snippet}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
 
                 <div className="panel-title">
                   참고 출처 <span>{displaySources.length}</span>

@@ -1,0 +1,67 @@
+{
+  "document_id": "doc_2064129c2057",
+  "file": "10_Notes/파이썬 세트 컴프리헨션.md",
+  "content_hash": "sha256:c6152ba25232c0c648ffe653908701dbe41292ebbd689e941d7bc337985cbf92",
+  "mentions": [
+    {
+      "text": "세트 컴프리헨션",
+      "concept_id": "python-set-comprehension",
+      "heading": "1. 한 줄 요약",
+      "confidence": 1
+    },
+    {
+      "text": "`{표현식 for 변수 in 반복가능객체 if 조건}`",
+      "concept_id": "python-set-comprehension",
+      "heading": "1. 한 줄 요약",
+      "confidence": 1
+    },
+    {
+      "text": "`set`",
+      "concept_id": "python-set",
+      "heading": "1. 한 줄 요약",
+      "confidence": 0.98
+    },
+    {
+      "text": "중복 제거",
+      "concept_id": "python-set",
+      "heading": "2. 왜 중요한가",
+      "confidence": 0.92
+    },
+    {
+      "text": "반복가능객체",
+      "concept_id": "iterable",
+      "heading": "3. 핵심 개념",
+      "confidence": 0.96
+    },
+    {
+      "text": "표현식",
+      "concept_id": "expression",
+      "heading": "3. 핵심 개념",
+      "confidence": 0.95
+    },
+    {
+      "text": "`if 조건`",
+      "concept_id": "filter-condition",
+      "heading": "3. 핵심 개념",
+      "confidence": 0.96
+    },
+    {
+      "text": "딕셔너리 컴프리헨션",
+      "concept_id": "dictionary-comprehension",
+      "heading": "3. 핵심 개념",
+      "confidence": 0.97
+    },
+    {
+      "text": "리스트 컴프리헨션",
+      "concept_id": "list-comprehension",
+      "heading": "1. 한 줄 요약",
+      "confidence": 0.9
+    },
+    {
+      "text": "`dict.fromkeys()`",
+      "concept_id": "dict-fromkeys",
+      "heading": "5. 중요한 세부사항, edge case, tradeoff",
+      "confidence": 0.98
+    }
+  ]
+}

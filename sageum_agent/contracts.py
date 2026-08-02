@@ -63,6 +63,12 @@ class JobResult:
     markdown: str | None = None
     html: str | None = None
     sources: list[dict[str, Any]] = field(default_factory=list)
+    obsidian_frontmatter: dict[str, Any] | None = None
+    concepts: list[dict[str, Any]] = field(default_factory=list)
+    mentions: list[dict[str, Any]] = field(default_factory=list)
+    relations: list[dict[str, Any]] = field(default_factory=list)
+    source_links: list[dict[str, Any]] = field(default_factory=list)
+    suggested_filename: str | None = None
     cache_hit: bool = False
     error: str | None = None
 
@@ -74,6 +80,12 @@ class JobResult:
         markdown: str,
         html: str,
         sources: list[dict[str, Any]] | None = None,
+        obsidian_frontmatter: dict[str, Any] | None = None,
+        concepts: list[dict[str, Any]] | None = None,
+        mentions: list[dict[str, Any]] | None = None,
+        relations: list[dict[str, Any]] | None = None,
+        source_links: list[dict[str, Any]] | None = None,
+        suggested_filename: str | None = None,
         cache_hit: bool = False,
     ) -> "JobResult":
         if not markdown:
@@ -86,6 +98,12 @@ class JobResult:
             markdown=markdown,
             html=html,
             sources=sources or [],
+            obsidian_frontmatter=obsidian_frontmatter,
+            concepts=concepts or [],
+            mentions=mentions or [],
+            relations=relations or [],
+            source_links=source_links or [],
+            suggested_filename=suggested_filename,
             cache_hit=cache_hit,
         )
     # @classmethod는 데코레이터다. failed()는 JobResult 클래스에서 바로 호출되며,
@@ -104,5 +122,11 @@ class JobResult:
             "markdown": self.markdown,
             "html": self.html,
             "sources": self.sources,
+            "obsidianFrontmatter": self.obsidian_frontmatter,
+            "concepts": self.concepts,
+            "mentions": self.mentions,
+            "relations": self.relations,
+            "sourceLinks": self.source_links,
+            "suggestedFilename": self.suggested_filename,
             "error": self.error,
         }

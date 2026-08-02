@@ -15,13 +15,34 @@ export class AgentJobService {
   ) {}
 
   async create(dto: CreateAgentJobDto) {
+    const topic = dto.topic.trim();
+    const level = dto.level ?? '입문';
+    const format = dto.format ?? '커리큘럼';
+    if (!dto.forceRefresh) {
+      const reusable = await this.jobs.findOne({
+        where: {
+          topic,
+          level,
+          format,
+          status: 'completed',
+        },
+        order: {
+          completedAt: 'DESC',
+        },
+      });
+      if (reusable) {
+        reusable.cacheHit = true;
+        return this.jobs.save(reusable);
+      }
+    }
+
     const id = `job_${Date.now()}_${randomBytes(4).toString('hex')}`;
     const callbackUrl = this.callbackUrl(id);
     const job = this.jobs.create({
       id,
-      topic: dto.topic.trim(),
-      level: dto.level ?? '입문',
-      format: dto.format ?? '커리큘럼',
+      topic,
+      level,
+      format,
       status: 'queued',
       callbackUrl,
     });
@@ -38,6 +59,8 @@ export class AgentJobService {
         callbackUrl,
         forceRefresh: dto.forceRefresh,
       });
+      job.status = 'running';
+      await this.jobs.save(job);
     } catch (error) {
       job.status = 'failed';
       job.error = error instanceof Error ? error.message : 'Sageum agent submit failed';
@@ -79,6 +102,15 @@ export class AgentJobService {
     job.search = dto.search ?? job.search;
     job.extract = dto.extract ?? job.extract;
     job.rawResult = dto.rawResult ?? job.rawResult;
+    job.semanticMetadata = {
+      ...(job.semanticMetadata ?? {}),
+      obsidianFrontmatter: dto.obsidianFrontmatter ?? job.semanticMetadata?.obsidianFrontmatter,
+      concepts: dto.concepts ?? job.semanticMetadata?.concepts ?? [],
+      mentions: dto.mentions ?? job.semanticMetadata?.mentions ?? [],
+      relations: dto.relations ?? job.semanticMetadata?.relations ?? [],
+      sourceLinks: dto.sourceLinks ?? job.semanticMetadata?.sourceLinks ?? dto.sources ?? job.sources ?? [],
+      suggestedFilename: dto.suggestedFilename ?? job.semanticMetadata?.suggestedFilename,
+    };
     job.cacheHit = dto.cacheHit ?? job.cacheHit;
     job.error = dto.error ?? null;
 

@@ -43,6 +43,7 @@ body {
 }
 
 button,
+input,
 textarea {
   font: inherit;
 }
@@ -324,6 +325,17 @@ svg {
   padding: 7px 12px;
   border-radius: 8px;
   font-size: 13px;
+}
+
+.btn.mini {
+  min-height: 26px;
+  padding: 4px 8px;
+  border-radius: 7px;
+  font-size: 11.5px;
+}
+
+.btn.danger {
+  color: var(--danger);
 }
 
 .btn:disabled {
@@ -938,6 +950,37 @@ svg {
   text-underline-offset: 3px;
 }
 
+.generated-html .mermaid {
+  display: block;
+  overflow-x: auto;
+  margin: 22px 0 28px;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  text-align: center;
+}
+
+.generated-html .mermaid svg {
+  max-width: 100%;
+  height: auto;
+}
+
+.generated-html .mermaid-error {
+  text-align: left;
+  white-space: pre-wrap;
+}
+
+.generated-html .mermaid-error::before {
+  display: block;
+  margin-bottom: 10px;
+  color: var(--danger);
+  content: attr(data-error);
+  font-family: var(--font-body);
+  font-size: 13px;
+  white-space: normal;
+}
+
 .markdown-output {
   overflow: auto;
   padding: 18px;
@@ -970,6 +1013,150 @@ svg {
   margin: 0;
   color: var(--muted);
   font-size: 12.5px;
+}
+
+.vault-status {
+  display: grid;
+  gap: 3px;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.vault-status b {
+  overflow-wrap: anywhere;
+  color: var(--fg);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.vault-status span,
+.vault-error,
+.empty-panel {
+  color: var(--faint);
+  font-size: 12px;
+}
+
+.vault-error {
+  color: var(--danger);
+}
+
+.candidate-list {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+
+.candidate {
+  display: grid;
+  gap: 3px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.candidate strong {
+  overflow-wrap: anywhere;
+  color: var(--fg);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.candidate span {
+  color: var(--faint);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+
+.relation-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 3px;
+}
+
+.vault-search {
+  display: grid;
+  gap: 8px;
+  margin: 6px 0 18px;
+}
+
+.vault-search label {
+  color: var(--faint);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.vault-search div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 32px;
+  gap: 8px;
+}
+
+.vault-search input {
+  min-width: 0;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  outline: 0;
+  background: var(--surface);
+  color: var(--fg);
+  font-size: 12.5px;
+}
+
+.vault-search input:focus {
+  border-color: var(--accent-line);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.vault-results {
+  display: grid;
+  gap: 9px;
+  margin-bottom: 22px;
+}
+
+.vault-match {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.vault-match span {
+  padding: 3px 7px;
+  border-radius: 6px;
+  background: var(--accent-soft);
+  color: var(--accent-deep);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+
+.vault-result {
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.vault-result strong {
+  color: var(--fg);
+  font-size: 13px;
+}
+
+.vault-result span {
+  color: var(--faint);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+
+.vault-result p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .refs {

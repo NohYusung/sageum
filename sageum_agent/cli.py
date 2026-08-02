@@ -7,7 +7,7 @@ import sys
 from typing import Any
 
 from .contracts import JobRequest, JobResult
-from .rendering import render_html, render_markdown
+from .rendering import render_html, render_markdown, render_obsidian_frontmatter, render_obsidian_markdown
 from .settings import load_settings
 
 
@@ -29,11 +29,11 @@ def _cmd_validate_job(_: argparse.Namespace) -> int:
     print(json.dumps(request.to_payload(), ensure_ascii=False))
     return 0
 
-
-def _cmd_render(_: argparse.Namespace) -> int:
+def _cmd_render(args: argparse.Namespace) -> int:
     curriculum = _read_json_stdin()
+    markdown = render_obsidian_markdown(curriculum) if args.format == "obsidian" else render_markdown(curriculum)
     payload = {
-        "markdown": render_markdown(curriculum),
+        "markdown": markdown,
         "html": render_html(curriculum),
     }
     print(json.dumps(payload, ensure_ascii=False))
@@ -54,7 +54,7 @@ def _cmd_codex_auth_status(_: argparse.Namespace) -> int:
     return 0
 
 
-def _cmd_run_job(_: argparse.Namespace) -> int:
+def _cmd_run_job(args: argparse.Namespace) -> int:
     from .curriculum import generate_curriculum
 
     request = JobRequest.from_payload(_read_json_stdin())
@@ -62,11 +62,25 @@ def _cmd_run_job(_: argparse.Namespace) -> int:
     async def run() -> JobResult:
         try:
             generated = await generate_curriculum(request.topic)
+            curriculum = generated["curriculum"]
+            markdown = (
+                render_obsidian_markdown(curriculum)
+                if args.format == "obsidian"
+                else generated["markdown"]
+            )
             return JobResult.completed(
                 job_id=request.job_id,
-                markdown=generated["markdown"],
+                markdown=markdown,
                 html=generated["html"],
                 sources=generated.get("sources", []),
+                obsidian_frontmatter={"raw": render_obsidian_frontmatter(curriculum)}
+                if args.format == "obsidian"
+                else None,
+                concepts=curriculum.get("concepts", []),
+                mentions=curriculum.get("mentions", []),
+                relations=curriculum.get("relations", []),
+                source_links=curriculum.get("sources", generated.get("sources", [])),
+                suggested_filename=f"{curriculum.get('topic') or request.topic}.md",
             )
         except Exception as exc:
             return JobResult.failed(job_id=request.job_id, error=str(exc))
@@ -100,12 +114,14 @@ def build_parser() -> argparse.ArgumentParser:
     validate.set_defaults(func=_cmd_validate_job)
 
     render = subcommands.add_parser("render", help="Render curriculum JSON to markdown and HTML")
+    render.add_argument("--format", choices=["markdown", "obsidian"], default="markdown")
     render.set_defaults(func=_cmd_render)
 
     tools = subcommands.add_parser("tools", help="Print the minimal Sageum agent toolset")
     tools.set_defaults(func=_cmd_tools)
 
     run_job = subcommands.add_parser("run-job", help="Run one backend job JSON from stdin")
+    run_job.add_argument("--format", choices=["markdown", "obsidian"], default="markdown")
     run_job.set_defaults(func=_cmd_run_job)
 
     status_cmd = subcommands.add_parser("codex-auth-status", help="Print Codex OAuth token availability")

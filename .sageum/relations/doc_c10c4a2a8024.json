@@ -1,0 +1,35 @@
+{
+  "document_id": "doc_c10c4a2a8024",
+  "relations": [
+    {
+      "relation_id": "rel_smoke_dragon_objective",
+      "source_concept_id": "concept_dragon",
+      "relation_type": "requires",
+      "target_concept_id": "concept_objective_control",
+      "evidence_text": "드래곤은 정글러 혼자 먹는 것이 아니라 라인 주도권과 시야 장악이 먼저 만들어낸 결과다.",
+      "confidence": 0.9,
+      "status": "candidate",
+      "created_by": "sageum-agent"
+    },
+    {
+      "relation_id": "rel_smoke_objective_lane",
+      "source_concept_id": "concept_objective_control",
+      "relation_type": "requires",
+      "target_concept_id": "concept_lane_priority",
+      "evidence_text": "드래곤은 라인 주도권이 먼저 만들어낸 결과다.",
+      "confidence": 0.85,
+      "status": "candidate",
+      "created_by": "sageum-agent"
+    },
+    {
+      "relation_id": "rel_smoke_objective_vision",
+      "source_concept_id": "concept_objective_control",
+      "relation_type": "requires",
+      "target_concept_id": "concept_vision_control",
+      "evidence_text": "드래곤은 시야 장악이 먼저 만들어낸 결과다.",
+      "confidence": 0.83,
+      "status": "candidate",
+      "created_by": "sageum-agent"
+    }
+  ]
+}

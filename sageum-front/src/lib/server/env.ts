@@ -18,8 +18,18 @@ function value(name: string) {
   return process.env[name]?.trim() || null;
 }
 
+const SUPPORTED_EMBEDDING_PROVIDERS = new Set([
+  'gemini',
+  'google',
+  'openai',
+  'openai-compatible',
+]);
+
 export function getProviderConfiguration(): ProviderConfiguration {
   const dimensions = Number.parseInt(value('EMBEDDING_DIMENSIONS') ?? '768', 10);
+  const embeddingProvider = value('EMBEDDING_PROVIDER')?.toLocaleLowerCase('en-US') ?? null;
+  const embeddingModel = value('EMBEDDING_MODEL');
+  const validDimensions = Number.isFinite(dimensions) && dimensions > 0 ? dimensions : 768;
   return {
     supabase: {
       configured: Boolean(
@@ -32,10 +42,15 @@ export function getProviderConfiguration(): ProviderConfiguration {
       collection: value('QDRANT_COLLECTION') ?? 'document_chunks',
     },
     embedding: {
-      configured: Boolean(value('EMBEDDING_PROVIDER') && value('EMBEDDING_MODEL')),
-      provider: value('EMBEDDING_PROVIDER'),
-      model: value('EMBEDDING_MODEL'),
-      dimensions: Number.isFinite(dimensions) && dimensions > 0 ? dimensions : 768,
+      configured: Boolean(
+        embeddingProvider &&
+          SUPPORTED_EMBEDDING_PROVIDERS.has(embeddingProvider) &&
+          embeddingModel &&
+          value('EMBEDDING_API_KEY'),
+      ),
+      provider: embeddingProvider,
+      model: embeddingModel,
+      dimensions: validDimensions,
     },
   };
 }

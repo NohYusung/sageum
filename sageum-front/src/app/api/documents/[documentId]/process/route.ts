@@ -10,6 +10,12 @@ import {
   parseDocumentSource,
   parserVersion,
 } from '@/lib/server/document-parser';
+import { getEmbeddingProvider } from '@/lib/server/embedding-provider';
+import { getProviderConfiguration } from '@/lib/server/env';
+import {
+  getQdrantVectorStore,
+  QdrantConfigurationError,
+} from '@/lib/server/qdrant-store';
 import type { Database, TablesInsert } from '@/lib/supabase/database.types';
 
 export const runtime = 'nodejs';
@@ -97,6 +103,8 @@ export async function POST(
     return Response.json({ error: '문서 처리 상태를 갱신하지 못했습니다.' }, { status: 500 });
   }
 
+  let vectorStore: ReturnType<typeof getQdrantVectorStore> | null = null;
+  let vectorIndexStarted = false;
   try {
     const { data: originalFile, error: downloadError } = await context.supabase.storage
       .from(DOCUMENT_BUCKET)
@@ -119,6 +127,49 @@ export async function POST(
     const chunks = chunkDocument(parsed);
     if (!chunks.length) {
       throw new ProcessingError('검색 가능한 본문이 없는 문서입니다.', 422);
+    }
+
+    const providers = getProviderConfiguration();
+    if (providers.embedding.configured !== providers.qdrant.configured) {
+      throw new ProcessingError(
+        '임베딩과 Qdrant 환경 설정은 모두 설정하거나 모두 비워야 합니다.',
+        503,
+      );
+    }
+
+    const vectorIndexEnabled = providers.embedding.configured && providers.qdrant.configured;
+    if (vectorIndexEnabled) {
+      const indexingStartedAt = new Date().toISOString();
+      const { error: indexingStatusError } = await context.supabase
+        .from('document_versions')
+        .update({
+          status: 'indexing',
+          error_message: null,
+          metadata: { processingStartedAt: startedAt, indexingStartedAt },
+        })
+        .eq('id', versionId)
+        .eq('owner_id', context.ownerId);
+      if (indexingStatusError) {
+        throw new ProcessingError('문서 인덱싱 상태를 갱신하지 못했습니다.');
+      }
+
+      const embeddingProvider = getEmbeddingProvider();
+      const vectors = await embeddingProvider.embedDocuments(chunks.map((chunk) => [
+        parsed.title,
+        chunk.headingPath.join(' › '),
+        chunk.text,
+      ].filter(Boolean).join('\n')));
+      vectorStore = getQdrantVectorStore();
+      await vectorStore.ensureCollection(embeddingProvider.dimensions);
+      vectorIndexStarted = true;
+      await vectorStore.deleteByVersion(context.ownerId, versionId);
+      await vectorStore.upsert(chunks.map((chunk, index) => ({
+        chunk,
+        ownerId: context.ownerId,
+        sourceType: parsed.sourceType,
+        documentTitle: parsed.title,
+        vector: vectors[index],
+      })));
     }
 
     const { error: clearChunksError } = await context.supabase
@@ -169,6 +220,10 @@ export async function POST(
       parser: parserVersion(parsed.sourceType),
       processedAt,
       processingStartedAt: startedAt,
+      vectorIndexed: vectorIndexEnabled,
+      embeddingProvider: vectorIndexEnabled ? providers.embedding.provider : null,
+      embeddingModel: vectorIndexEnabled ? providers.embedding.model : null,
+      embeddingDimensions: vectorIndexEnabled ? providers.embedding.dimensions : null,
     };
     const { error: versionUpdateError } = await context.supabase
       .from('document_versions')
@@ -191,13 +246,23 @@ export async function POST(
     const response = { document: indexedDocument } satisfies ProcessDocumentResponse;
     return Response.json(response);
   } catch (error) {
+    if (vectorIndexStarted && vectorStore) {
+      try {
+        await vectorStore.deleteByVersion(context.ownerId, versionId);
+      } catch (cleanupError) {
+        console.error('Failed to clean up Qdrant points after processing failure', cleanupError);
+      }
+    }
     const publicError = error instanceof ProcessingError
       || error instanceof DocumentValidationError
       || error instanceof DocumentParsingError
+      || error instanceof QdrantConfigurationError
       ? error.message
       : '문서 처리에 실패했습니다.';
     const status = error instanceof ProcessingError
       ? error.status
+      : error instanceof QdrantConfigurationError
+        ? 503
       : error instanceof DocumentValidationError || error instanceof DocumentParsingError
         ? 422
         : 500;

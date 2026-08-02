@@ -12,18 +12,21 @@
 - PDF 페이지, DOCX 제목 계층, XLSX 시트·셀 범위를 보존하는 구조 추출
 - 제목 경로와 원문 위치를 유지하는 구조화 블록
 - 400단어 목표, 최대 500단어, 60단어 중첩의 단어 기반 청킹
-- 로컬 어휘 검색과 근거 없는 답변 거부
+- Gemini·OpenAI 호환 임베딩 공급자 어댑터
+- 사용자·문서 필터를 강제하는 Qdrant 벡터 색인·검색
+- 공급자 미설정 시 로컬 어휘 검색 fallback과 근거 없는 답변 거부
 - 답변별 원문 청크와 문서 상세 연결
-- Supabase 서버 클라이언트 및 Qdrant 컬렉션 어댑터 골격
+- Qdrant Collection 차원 검증과 payload index 자동 준비
 - Supabase 문서·버전·청크 스키마, 소유자 RLS, private `documents` bucket
 - signed upload URL을 이용한 Storage 직접 업로드
 - 문서 처리 API의 구조 추출, SHA-256 해시, 단어 청킹, PostgreSQL 영속화
+- 문서 처리·재처리·삭제 시 Qdrant 벡터 생명주기 연결
+- 인증된 `/api/search`의 질문 임베딩과 사용자별 Qdrant 검색
 - 로그인 사용자별 문서와 최신 청크 복원
 - 공급자 설정 상태를 노출하는 `/api/system`
 
 ## 다음 구현 범위
 
-- 임베딩 공급자와 Qdrant 실제 색인·검색 API
 - 검색 결과를 근거로 하는 LLM 답변 스트리밍
 - Vercel·Supabase·Qdrant Cloud 환경 연결
 
@@ -49,7 +52,10 @@ npm run dev
 - Supabase URL과 publishable key를 설정하고 이메일 계정을 만든 뒤 실행합니다.
 - 업로드한 MD, HTML, TXT, PDF, DOCX, XLSX는 private Storage와 PostgreSQL에 영구 저장됩니다.
 - PDF 파서는 페이지, DOCX 파서는 제목 경로, XLSX 파서는 시트와 표 범위를 청크에 기록합니다.
+- `EMBEDDING_PROVIDER=gemini`, `EMBEDDING_MODEL=gemini-embedding-001`, 768차원을 무료 데모 기본값으로 사용합니다.
+- Qdrant와 임베딩 설정이 모두 없으면 기존 로컬 검색으로 동작하고, 모두 설정하면 업로드부터 벡터 검색까지 활성화됩니다.
 - 공급자 키는 `NEXT_PUBLIC_` 접두사가 없는 서버 환경변수로만 저장합니다.
+- 공급자 환경변수를 설정한 뒤 `npm run qdrant:setup`으로 Collection과 필터 index를 미리 준비할 수 있습니다.
 
 ## 검증
 

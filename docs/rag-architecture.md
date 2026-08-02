@@ -68,13 +68,15 @@ flowchart LR
 - point id: 청크 ID를 입력으로 만든 결정적 UUID
 - payload:
   - `owner_id`, `document_id`, `version_id`, `chunk_id`
-  - `source_type`, `ordinal`, `text`, `heading_path`
+  - `document_title`, `source_type`, `ordinal`, `text`, `heading_path`
   - `page`, `sheet`, `cell_range`
 - payload index:
   - UUID: `owner_id`, `document_id`, `version_id`
   - keyword: `source_type`
 - 모든 query는 `owner_id` must-filter를 포함한다.
+- 선택 문서 검색은 `document_id match any`를 추가하고, 삭제는 `owner_id`와 문서·버전을 함께 필터한다.
 - strict mode에서 필터가 거부되지 않도록 컬렉션 사용 전에 payload index를 생성한다.
+- 기존 Collection 벡터 차원이 설정과 다르면 자동 재생성하지 않고 운영 오류로 반환한다.
 
 ## 수집 파이프라인
 
@@ -120,6 +122,7 @@ flowchart LR
 - 완료: Supabase 문서·버전·청크 마이그레이션, RLS, private Storage bucket
 - 완료: Supabase Auth, signed direct upload, 서버 파싱·청킹, 메타데이터 영속화
 - 완료: PDF 페이지, DOCX 제목·목록·표, XLSX 시트·셀 범위 파서
-- 다음: 임베딩 공급자 연결
-- 다음: Qdrant 색인·검색, 근거 기반 LLM 스트리밍
+- 완료: Gemini·OpenAI 호환 임베딩 공급자 연결
+- 완료: Qdrant 사용자별 색인·검색과 문서 벡터 정리
+- 다음: 검색 근거 기반 LLM 스트리밍
 - 마지막: Vercel·Supabase·Qdrant Cloud 연결과 브라우저 E2E

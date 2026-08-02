@@ -10,7 +10,8 @@
     "build": "next build",
     "start": "next start",
     "test": "tsx --test 'src/**/*.test.ts'",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "qdrant:setup": "node --env-file=.env.local --import tsx scripts/setup-qdrant.ts"
   },
   "dependencies": {
     "@qdrant/js-client-rest": "1.18.0",

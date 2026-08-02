@@ -9,11 +9,15 @@ export type IndexedDocument = {
 
 export type SourceReference = {
   documentId: string;
+  versionId?: string;
   documentTitle: string;
   chunkId: string;
   heading: string;
   snippet: string;
   score: number;
+  page?: number;
+  sheet?: string;
+  cellRange?: string;
 };
 
 function queryTerms(query: string) {

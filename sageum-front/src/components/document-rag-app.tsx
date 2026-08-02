@@ -23,9 +23,13 @@ import {
   UploadCloud,
   XCircle,
 } from 'lucide-react';
-import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { logoutAction } from '@/app/actions';
 import { uploadAndProcessDocument } from '@/lib/documents/browser-upload';
+import type {
+  ApiErrorResponse,
+  SearchDocumentsResponse,
+} from '@/lib/documents/contracts';
 import {
   composeExtractiveAnswer,
   searchDocuments,
@@ -102,6 +106,41 @@ function chunkLocation(location: DocumentChunk['location']) {
   return null;
 }
 
+function sourceLocation(source: SourceReference) {
+  if (source.page !== undefined) return `${source.page}페이지`;
+  if (source.sheet) return source.cellRange ? `${source.sheet} · ${source.cellRange}` : source.sheet;
+  return null;
+}
+
+async function searchRepository(documents: IndexedDocument[], query: string) {
+  const response = await fetch('/api/search', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query, topK: 8 }),
+  });
+  const payload = await response.json().catch(() => null) as
+    | SearchDocumentsResponse
+    | ApiErrorResponse
+    | null;
+
+  if (response.ok && payload && 'sources' in payload) {
+    return { answer: payload.answer, sources: payload.sources };
+  }
+  if (
+    response.status === 503 &&
+    payload &&
+    'code' in payload &&
+    payload.code === 'VECTOR_SEARCH_NOT_CONFIGURED'
+  ) {
+    const sources = searchDocuments(documents, query);
+    return { answer: composeExtractiveAnswer(sources), sources };
+  }
+  const message = payload && 'error' in payload
+    ? payload.error
+    : '문서 검색 요청을 처리하지 못했습니다.';
+  throw new Error(message);
+}
+
 function fileIcon(type: IndexedDocument['document']['sourceType']) {
   if (type === 'xlsx') return FileSpreadsheet;
   if (type === 'html' || type === 'markdown') return FileCode2;
@@ -126,6 +165,7 @@ export function DocumentRagApp({
   const [activeSources, setActiveSources] = useState<SourceReference[]>([]);
   const [uploadMessage, setUploadMessage] = useState<string | null>(null);
   const [uploadBusy, setUploadBusy] = useState(false);
+  const [searchBusy, setSearchBusy] = useState(false);
   const [system, setSystem] = useState<SystemStatus | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const conversationRef = useRef<HTMLDivElement | null>(null);
@@ -184,7 +224,11 @@ export function DocumentRagApp({
         ...current.filter(({ document }) => !uploadedIds.has(document.id)),
       ]);
       setSelectedDocumentId(succeeded[0].document.id);
-      setUploadMessage(`${succeeded.length}개 문서를 Supabase에 저장하고 청크로 분할했습니다.`);
+      setUploadMessage(
+        system?.mode === 'cloud'
+          ? `${succeeded.length}개 문서를 Supabase에 저장하고 Qdrant에 색인했습니다.`
+          : `${succeeded.length}개 문서를 Supabase에 저장하고 청크로 분할했습니다.`,
+      );
       setView('documents');
     }
     if (failures.length) {
@@ -193,26 +237,45 @@ export function DocumentRagApp({
     setUploadBusy(false);
   }
 
-  function handleQuestion(event: FormEvent<HTMLFormElement>) {
+  async function handleQuestion(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const question = query.trim();
-    if (!question) return;
+    if (!question || searchBusy) return;
 
-    const sources = searchDocuments(documents, question);
     const now = Date.now();
+    setQuery('');
+    setSearchBusy(true);
     setMessages((current) => [
       ...current,
       { id: `user-${now}`, role: 'user', text: question },
-      {
-        id: `assistant-${now}`,
-        role: 'assistant',
-        text: composeExtractiveAnswer(sources),
-        sources,
-      },
     ]);
-    setActiveSources(sources);
-    if (sources[0]) setSelectedDocumentId(sources[0].documentId);
-    setQuery('');
+
+    try {
+      const result = await searchRepository(documents, question);
+      setMessages((current) => [
+        ...current,
+        {
+          id: `assistant-${now}`,
+          role: 'assistant',
+          text: result.answer,
+          sources: result.sources,
+        },
+      ]);
+      setActiveSources(result.sources);
+      if (result.sources[0]) setSelectedDocumentId(result.sources[0].documentId);
+    } catch (error) {
+      setMessages((current) => [
+        ...current,
+        {
+          id: `assistant-${now}`,
+          role: 'assistant',
+          text: error instanceof Error ? error.message : '문서 검색에 실패했습니다.',
+        },
+      ]);
+      setActiveSources([]);
+    } finally {
+      setSearchBusy(false);
+    }
   }
 
   function openSource(source: SourceReference) {
@@ -333,9 +396,15 @@ export function DocumentRagApp({
                   onChange={(event) => setQuery(event.target.value)}
                   placeholder="예: 재택근무는 일주일에 몇 번 가능한가요?"
                   rows={1}
+                  disabled={searchBusy}
                 />
-                <button className="send-button" type="submit" aria-label="질문 보내기" disabled={!query.trim()}>
-                  <Send size={18} />
+                <button
+                  className="send-button"
+                  type="submit"
+                  aria-label="질문 보내기"
+                  disabled={!query.trim() || searchBusy}
+                >
+                  {searchBusy ? <LoaderCircle size={18} className="spin" /> : <Send size={18} />}
                 </button>
               </form>
               <p>현재는 검색·출처 흐름을 검증하는 추출형 답변 모드입니다.</p>
@@ -539,7 +608,9 @@ export function DocumentRagApp({
                   <div>
                     <span className="source-score">{Math.round(source.score * 100)}% match</span>
                     <strong>{source.documentTitle}</strong>
-                    <small>{source.heading}</small>
+                    <small>
+                      {[source.heading, sourceLocation(source)].filter(Boolean).join(' · ')}
+                    </small>
                     <p>{source.snippet}</p>
                   </div>
                 </button>

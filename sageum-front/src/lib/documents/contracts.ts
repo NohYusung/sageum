@@ -1,4 +1,4 @@
-import type { IndexedDocument } from '@/lib/rag/local-search';
+import type { IndexedDocument, SourceReference } from '@/lib/rag/local-search';
 
 export type DocumentUploadTicket = {
   documentId: string;
@@ -16,6 +16,13 @@ export type ProcessDocumentResponse = {
   document: IndexedDocument;
 };
 
+export type SearchDocumentsResponse = {
+  answer: string;
+  sources: SourceReference[];
+  mode: 'qdrant';
+};
+
 export type ApiErrorResponse = {
   error: string;
+  code?: string;
 };

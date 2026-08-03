@@ -79,6 +79,7 @@ const CHUNK: DocumentChunk = {
   headingPath: ['신청 기준'],
   blockStart: 0,
   blockEnd: 0,
+  focusBlock: 0,
   location: { page: 2, cellRange: 'A1:B2' },
 };
 
@@ -129,6 +130,7 @@ test('청크 위치를 payload로 저장하고 소유자·문서 필터로 검�
   };
   assert.equal(upsert.points[0].payload.page, 2);
   assert.equal(upsert.points[0].payload.cell_range, 'A1:B2');
+  assert.equal(upsert.points[0].payload.focus_block, 0);
   assert.equal(
     upsert.points[0].vector.dense.model,
     'intfloat/multilingual-e5-small',
@@ -185,6 +187,12 @@ test('버전 삭제에도 owner_id 필터를 항상 포함한다', async () => {
     '123e4567-e89b-42d3-a456-426614174001',
   );
 
-  const deletion = fake.deletions[0] as { filter: { must: Array<{ key: string }> } };
+  const deletion = fake.deletions[0] as {
+    filter: { must: Array<{ key: string }> };
+    ordering: string;
+    wait: boolean;
+  };
   assert.deepEqual(deletion.filter.must.map((condition) => condition.key), ['owner_id', 'version_id']);
+  assert.equal(deletion.wait, true);
+  assert.equal(deletion.ordering, 'strong');
 });

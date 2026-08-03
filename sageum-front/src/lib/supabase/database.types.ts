@@ -74,6 +74,53 @@ export type Database = {
           },
         ];
       };
+      document_deletion_jobs: {
+        Row: {
+          attempts: number;
+          created_at: string;
+          document_id: string;
+          id: string;
+          last_error: string | null;
+          owner_id: string;
+          requires_vector_cleanup: boolean;
+          status: string;
+          storage_paths: string[];
+          updated_at: string;
+        };
+        Insert: {
+          attempts?: number;
+          created_at?: string;
+          document_id: string;
+          id?: string;
+          last_error?: string | null;
+          owner_id: string;
+          requires_vector_cleanup?: boolean;
+          status?: string;
+          storage_paths?: string[];
+          updated_at?: string;
+        };
+        Update: {
+          attempts?: number;
+          created_at?: string;
+          document_id?: string;
+          id?: string;
+          last_error?: string | null;
+          owner_id?: string;
+          requires_vector_cleanup?: boolean;
+          status?: string;
+          storage_paths?: string[];
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'document_deletion_jobs_document_owner_fkey';
+            columns: ['document_id', 'owner_id'];
+            isOneToOne: true;
+            referencedRelation: 'documents';
+            referencedColumns: ['id', 'owner_id'];
+          },
+        ];
+      };
       document_versions: {
         Row: {
           content_hash: string | null;
@@ -130,6 +177,7 @@ export type Database = {
       documents: {
         Row: {
           created_at: string;
+          deletion_status: string;
           id: string;
           latest_version_id: string | null;
           owner_id: string;
@@ -139,6 +187,7 @@ export type Database = {
         };
         Insert: {
           created_at?: string;
+          deletion_status?: string;
           id?: string;
           latest_version_id?: string | null;
           owner_id: string;
@@ -148,6 +197,7 @@ export type Database = {
         };
         Update: {
           created_at?: string;
+          deletion_status?: string;
           id?: string;
           latest_version_id?: string | null;
           owner_id?: string;
@@ -162,7 +212,18 @@ export type Database = {
       [_ in never]: never;
     };
     Functions: {
-      [_ in never]: never;
+      complete_document_deletion: {
+        Args: { p_document_id: string; p_job_id: string };
+        Returns: undefined;
+      };
+      request_document_deletion: {
+        Args: { p_document_id: string };
+        Returns: {
+          job_id: string;
+          requires_vector_cleanup: boolean;
+          storage_paths: string[];
+        }[];
+      };
     };
     Enums: {
       [_ in never]: never;

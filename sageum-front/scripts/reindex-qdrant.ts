@@ -7,12 +7,14 @@ import { getSupabaseAdminClient } from '../src/lib/server/supabase';
 const PAGE_SIZE = 500;
 
 function metadataNumber(metadata: Json, key: string) {
-  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return 0;
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return undefined;
   const value = metadata[key];
-  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
 function toDocumentChunk(row: Tables<'document_chunks'>): DocumentChunk {
+  const blockStart = metadataNumber(row.metadata, 'blockStart') ?? 0;
+  const blockEnd = metadataNumber(row.metadata, 'blockEnd') ?? blockStart;
   return {
     id: row.id,
     documentId: row.document_id,
@@ -21,8 +23,9 @@ function toDocumentChunk(row: Tables<'document_chunks'>): DocumentChunk {
     text: row.text,
     wordCount: row.word_count,
     headingPath: row.heading_path,
-    blockStart: metadataNumber(row.metadata, 'blockStart'),
-    blockEnd: metadataNumber(row.metadata, 'blockEnd'),
+    blockStart,
+    blockEnd,
+    focusBlock: metadataNumber(row.metadata, 'focusBlock') ?? blockEnd,
     location: {
       page: row.page ?? undefined,
       sheet: row.sheet ?? undefined,

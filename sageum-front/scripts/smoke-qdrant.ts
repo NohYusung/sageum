@@ -25,6 +25,7 @@ async function main() {
     headingPath: ['근무 제도'],
     blockStart: 0,
     blockEnd: 0,
+    focusBlock: 0,
     location: {},
   };
   const distractorChunks: DocumentChunk[] = [

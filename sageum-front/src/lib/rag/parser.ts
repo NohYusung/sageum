@@ -1,3 +1,4 @@
+import { load } from 'cheerio';
 import type {
   DocumentLocation,
   DocumentSourceType,
@@ -101,14 +102,19 @@ export function normalizeMarkdownSource(
   return buildNormalizedDocument(name, mimeType, 'markdown', source.length, blocks);
 }
 
-function decodeHtmlEntities(value: string) {
-  return value
-    .replace(/&nbsp;/giu, ' ')
-    .replace(/&amp;/giu, '&')
-    .replace(/&lt;/giu, '<')
-    .replace(/&gt;/giu, '>')
-    .replace(/&quot;/giu, '"')
-    .replace(/&#39;|&apos;/giu, "'");
+const HTML_BLOCK_SELECTOR = [
+  'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+  'p', 'ul', 'ol', 'table', 'pre', 'blockquote',
+  'div', 'section', 'article', 'main', 'header', 'footer', 'aside', 'nav',
+].join(',');
+const HTML_CONTAINER_TAGS = new Set([
+  'div', 'section', 'article', 'main', 'header', 'footer', 'aside', 'nav',
+]);
+
+function htmlHeadingPath(headings: Map<number, string>) {
+  return [...headings.entries()]
+    .sort(([left], [right]) => left - right)
+    .map(([, title]) => title);
 }
 
 export function normalizeHtmlSource(
@@ -116,18 +122,59 @@ export function normalizeHtmlSource(
   name = 'document.html',
   mimeType = 'text/html',
 ): NormalizedDocument {
-  const withoutNoise = source
-    .replace(/<(script|style|noscript)[^>]*>[\s\S]*?<\/\1>/giu, ' ')
-    .replace(/<\s*br\s*\/?\s*>/giu, '\n')
-    .replace(/<\/(p|div|section|article|li|tr|h[1-6])\s*>/giu, '\n')
-    .replace(/<[^>]+>/gu, ' ');
-  const text = decodeHtmlEntities(withoutNoise)
-    .split('\n')
-    .map((line) => line.replace(/\s+/gu, ' ').trim())
-    .filter(Boolean)
-    .join('\n\n');
-  const document = normalizeMarkdownSource(text, name, mimeType);
-  return { ...document, sourceType: 'html' };
+  const $ = load(source, null, false);
+  $('script,style,noscript,iframe,object,embed,form').remove();
+  $('br').replaceWith('\n');
+
+  const blocks: NormalizedBlock[] = [];
+  const headings = new Map<number, string>();
+  $(HTML_BLOCK_SELECTOR).each((_index, element) => {
+    const selection = $(element);
+    const tagName = selection.prop('tagName')?.toLocaleLowerCase('en-US') ?? '';
+    const hasNestedBlock = HTML_CONTAINER_TAGS.has(tagName)
+      && selection.find(HTML_BLOCK_SELECTOR).length > 0;
+    if (
+      hasNestedBlock
+      || selection.parents('table,ul,ol').length
+      || !selection.text().replace(/\s+/gu, ' ').trim()
+    ) {
+      return;
+    }
+
+    if (/^h[1-6]$/u.test(tagName)) {
+      const level = Number(tagName.slice(1));
+      const title = selection.text().replace(/\s+/gu, ' ').trim();
+      for (const existingLevel of headings.keys()) {
+        if (existingLevel >= level) headings.delete(existingLevel);
+      }
+      headings.set(level, title);
+      appendNormalizedBlock(blocks, 'heading', title, htmlHeadingPath(headings));
+      return;
+    }
+
+    if (tagName === 'ul' || tagName === 'ol') {
+      const ordered = tagName === 'ol';
+      const items = selection.find('li').map((itemIndex, item) => {
+        const itemSelection = $(item).clone();
+        itemSelection.find('ul,ol').remove();
+        return `${ordered ? `${itemIndex + 1}.` : '-'} ${itemSelection.text()}`;
+      }).get();
+      appendNormalizedBlock(blocks, 'list', items.join('\n'), htmlHeadingPath(headings));
+      return;
+    }
+
+    if (tagName === 'table') {
+      const rows = selection.find('tr').map((_rowIndex, row) =>
+        $(row).find('th,td').map((_cellIndex, cell) => $(cell).text()).get().join(' | '),
+      ).get();
+      appendNormalizedBlock(blocks, 'table', rows.join('\n'), htmlHeadingPath(headings));
+      return;
+    }
+
+    appendNormalizedBlock(blocks, 'paragraph', selection.text(), htmlHeadingPath(headings));
+  });
+
+  return buildNormalizedDocument(name, mimeType, 'html', source.length, blocks);
 }
 
 export function normalizeTextSource(

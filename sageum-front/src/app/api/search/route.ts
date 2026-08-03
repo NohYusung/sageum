@@ -54,12 +54,26 @@ export async function POST(request: Request) {
     const vectorStore = getQdrantVectorStore();
     await vectorStore.ensureCollection(configuration.embedding.dimensions);
     const results = await vectorStore.query(search.query, context.ownerId, {
-      limit: search.topK,
+      limit: Math.min(search.topK * 2, 40),
       documentIds: search.documentIds,
       scoreThreshold: scoreThreshold(),
       embeddingModel: configuration.embedding.model,
     });
-    const sources: SourceReference[] = results.map((result) => ({
+    const resultDocumentIds = [...new Set(results.map((result) => result.documentId).filter(Boolean))];
+    const { data: activeDocuments, error: activeDocumentsError } = resultDocumentIds.length
+      ? await context.supabase
+        .from('documents')
+        .select('id')
+        .eq('owner_id', context.ownerId)
+        .eq('deletion_status', 'active')
+        .in('id', resultDocumentIds)
+      : { data: [], error: null };
+    if (activeDocumentsError) throw new Error('활성 문서 상태를 확인하지 못했습니다.');
+    const activeDocumentIds = new Set(activeDocuments.map((document) => document.id));
+    const activeResults = results
+      .filter((result) => activeDocumentIds.has(result.documentId))
+      .slice(0, search.topK);
+    const sources: SourceReference[] = activeResults.map((result) => ({
       documentId: result.documentId,
       versionId: result.versionId,
       documentTitle: result.documentTitle || '문서',

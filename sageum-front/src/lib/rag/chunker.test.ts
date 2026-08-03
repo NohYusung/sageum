@@ -98,3 +98,53 @@ test('페이지 경계가 다른 블록을 하나의 청크로 합치지 않는�
 
   assert.deepEqual(chunks.map((chunk) => chunk.location.page), [1, 2]);
 });
+
+test('제목 경계를 넘지 않고 표시 제목과 이동 블록을 같은 섹션에 유지한다', () => {
+  const document = makeDocument(0);
+  document.blocks = [
+    {
+      id: 'title',
+      kind: 'heading',
+      text: '두비덥 운영 문서',
+      headingPath: ['두비덥 운영 문서'],
+      location: {},
+    },
+    {
+      id: 'intro',
+      kind: 'paragraph',
+      text: Array.from({ length: 80 }, (_, index) => `소개${index}`).join(' '),
+      headingPath: ['두비덥 운영 문서'],
+      location: {},
+    },
+    {
+      id: 'environment-heading',
+      kind: 'heading',
+      text: '환경 변수 명세',
+      headingPath: ['개발 매뉴얼', '환경 변수 명세'],
+      location: {},
+    },
+    {
+      id: 'environment-table',
+      kind: 'table',
+      text: Array.from({ length: 80 }, (_, index) => `변수${index}`).join(' '),
+      headingPath: ['개발 매뉴얼', '환경 변수 명세'],
+      location: {},
+    },
+  ];
+
+  const chunks = chunkDocument(document, {
+    targetWords: 120,
+    maxWords: 140,
+    overlapWords: 20,
+  });
+
+  assert.equal(chunks.length, 2);
+  assert.deepEqual(chunks.map((chunk) => chunk.headingPath), [
+    ['두비덥 운영 문서'],
+    ['개발 매뉴얼', '환경 변수 명세'],
+  ]);
+  assert.deepEqual(chunks.map((chunk) => chunk.blockStart), [0, 2]);
+  assert.deepEqual(chunks.map((chunk) => chunk.focusBlock), [0, 2]);
+  assert.doesNotMatch(chunks[0].text, /환경 변수/u);
+  assert.doesNotMatch(chunks[1].text, /두비덥/u);
+});

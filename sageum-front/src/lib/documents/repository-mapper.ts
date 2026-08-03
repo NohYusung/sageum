@@ -55,25 +55,32 @@ export function mapStoredDocument(
       sizeBytes: version.size_bytes,
       blocks: [],
     },
-    chunks: chunks.map((chunk) => ({
-      id: chunk.id,
-      documentId: chunk.document_id,
-      versionId: chunk.version_id,
-      ordinal: chunk.ordinal,
-      text: chunk.text,
-      wordCount: chunk.word_count,
-      headingPath: chunk.heading_path,
-      blockStart: metadataNumber(chunk.metadata, 'blockStart') ?? 0,
-      blockEnd: metadataNumber(chunk.metadata, 'blockEnd') ?? 0,
-      location: {
-        page: chunk.page ?? undefined,
-        sheet: chunk.sheet ?? undefined,
-        cellRange: chunk.cell_range ?? undefined,
-        startOffset: chunk.start_offset ?? undefined,
-        endOffset: chunk.end_offset ?? undefined,
-      },
-    })),
-    status: indexedStatus(version.status),
+    chunks: chunks.map((chunk) => {
+      const blockStart = metadataNumber(chunk.metadata, 'blockStart') ?? 0;
+      const blockEnd = metadataNumber(chunk.metadata, 'blockEnd') ?? blockStart;
+      return {
+        id: chunk.id,
+        documentId: chunk.document_id,
+        versionId: chunk.version_id,
+        ordinal: chunk.ordinal,
+        text: chunk.text,
+        wordCount: chunk.word_count,
+        headingPath: chunk.heading_path,
+        blockStart,
+        blockEnd,
+        focusBlock: metadataNumber(chunk.metadata, 'focusBlock') ?? blockEnd,
+        location: {
+          page: chunk.page ?? undefined,
+          sheet: chunk.sheet ?? undefined,
+          cellRange: chunk.cell_range ?? undefined,
+          startOffset: chunk.start_offset ?? undefined,
+          endOffset: chunk.end_offset ?? undefined,
+        },
+      };
+    }),
+    status: document.deletion_status === 'deleting'
+      ? 'deleting'
+      : indexedStatus(version.status),
     indexedAt: metadataString(version.metadata, 'processedAt') ?? version.created_at,
   };
 }

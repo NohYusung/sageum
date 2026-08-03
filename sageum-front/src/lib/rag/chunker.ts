@@ -12,12 +12,17 @@ type WordToken = {
 };
 
 const SENTENCE_END = /[.!?。！？][\]})"'’”]*$/u;
+export const CHUNKER_VERSION = 'word-heading-v2';
 
 function segmentKey(document: NormalizedDocument, blockIndex: number) {
-  const location = document.blocks[blockIndex].location;
-  if (location.page !== undefined) return `page:${location.page}`;
-  if (location.sheet) return `sheet:${location.sheet}:range:${location.cellRange ?? ''}`;
-  return 'document';
+  const block = document.blocks[blockIndex];
+  const location = block.location;
+  const locationKey = location.page !== undefined
+    ? `page:${location.page}`
+    : location.sheet
+      ? `sheet:${location.sheet}:range:${location.cellRange ?? ''}`
+      : 'document';
+  return `${locationKey}:heading:${JSON.stringify(block.headingPath)}`;
 }
 
 function tokenizeSegments(document: NormalizedDocument): WordToken[][] {
@@ -108,9 +113,10 @@ export function chunkDocument(
         ordinal,
         text: window.map((token) => token.value).join(' '),
         wordCount: window.length,
-        headingPath: lastBlock.headingPath.length ? lastBlock.headingPath : firstBlock.headingPath,
+        headingPath: firstBlock.headingPath.length ? firstBlock.headingPath : lastBlock.headingPath,
         blockStart: firstBlockIndex,
         blockEnd: lastBlockIndex,
+        focusBlock: firstBlockIndex,
         location: {
           page: firstBlock.location.page ?? lastBlock.location.page,
           sheet: firstBlock.location.sheet ?? lastBlock.location.sheet,

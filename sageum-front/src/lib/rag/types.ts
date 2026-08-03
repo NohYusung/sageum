@@ -37,6 +37,7 @@ export type DocumentChunk = {
   headingPath: string[];
   blockStart: number;
   blockEnd: number;
+  focusBlock: number;
   location: DocumentLocation;
 };
 

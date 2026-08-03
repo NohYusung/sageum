@@ -216,6 +216,7 @@ export class QdrantVectorStore {
                 ordinal: chunk.ordinal,
                 text: chunk.text,
                 heading_path: chunk.headingPath,
+                focus_block: chunk.focusBlock,
                 page: chunk.location.page,
                 sheet: chunk.location.sheet,
                 cell_range: chunk.location.cellRange,
@@ -340,6 +341,7 @@ export class QdrantVectorStore {
     if (!exists) return;
     await this.client.delete(this.collectionName, {
       wait: true,
+      ordering: 'strong',
       filter: { must },
     });
   }

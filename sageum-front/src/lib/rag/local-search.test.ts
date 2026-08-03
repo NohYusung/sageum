@@ -25,6 +25,7 @@ const DOCUMENTS: IndexedDocument[] = [
         headingPath: ['신청 기준'],
         blockStart: 0,
         blockEnd: 0,
+        focusBlock: 0,
         location: {},
       },
       {
@@ -37,6 +38,7 @@ const DOCUMENTS: IndexedDocument[] = [
         headingPath: ['교육'],
         blockStart: 1,
         blockEnd: 1,
+        focusBlock: 1,
         location: {},
       },
     ],
@@ -65,4 +67,12 @@ test('검색 근거가 없을 때 답변 생성을 거부한다', () => {
 test('검색 결과 개수 제한을 적용한다', () => {
   const results = searchDocuments(DOCUMENTS, '재택근무 보안', 1);
   assert.equal(results.length, 1);
+});
+
+test('삭제 중인 문서는 로컬 검색 결과에서도 제외한다', () => {
+  const deletingDocuments = DOCUMENTS.map((document) => ({
+    ...document,
+    status: 'deleting' as const,
+  }));
+  assert.deepEqual(searchDocuments(deletingDocuments, '재택근무'), []);
 });

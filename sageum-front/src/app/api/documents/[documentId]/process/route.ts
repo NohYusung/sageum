@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { ProcessDocumentResponse } from '@/lib/documents/contracts';
 import { DOCUMENT_BUCKET, DocumentValidationError } from '@/lib/documents/validation';
-import { chunkDocument } from '@/lib/rag/chunker';
+import { CHUNKER_VERSION, chunkDocument } from '@/lib/rag/chunker';
 import type { IndexedDocument } from '@/lib/rag/local-search';
 import { getAuthenticatedRequestContext } from '@/lib/server/api-auth';
 import {
@@ -84,6 +84,9 @@ export async function POST(
   }
   if (!documentResult.data || !versionResult.data) {
     return Response.json({ error: '문서를 찾을 수 없습니다.' }, { status: 404 });
+  }
+  if (documentResult.data.deletion_status === 'deleting') {
+    return Response.json({ error: '삭제 중인 문서는 다시 처리할 수 없습니다.' }, { status: 409 });
   }
 
   const version = versionResult.data;
@@ -180,7 +183,11 @@ export async function POST(
       cell_range: chunk.location.cellRange ?? null,
       start_offset: chunk.location.startOffset ?? null,
       end_offset: chunk.location.endOffset ?? null,
-      metadata: { blockStart: chunk.blockStart, blockEnd: chunk.blockEnd },
+      metadata: {
+        blockStart: chunk.blockStart,
+        blockEnd: chunk.blockEnd,
+        focusBlock: chunk.focusBlock,
+      },
     }));
     const { error: chunksError } = await context.supabase
       .from('document_chunks')
@@ -204,6 +211,7 @@ export async function POST(
     const versionMetadata = {
       blockCount: parsed.blocks.length,
       chunkCount: chunks.length,
+      chunker: CHUNKER_VERSION,
       parser: parserVersion(parsed.sourceType),
       processedAt,
       processingStartedAt: startedAt,

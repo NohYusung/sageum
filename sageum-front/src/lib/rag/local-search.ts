@@ -3,7 +3,7 @@ import type { DocumentChunk, NormalizedDocument } from './types';
 export type IndexedDocument = {
   document: NormalizedDocument;
   chunks: DocumentChunk[];
-  status: 'ready' | 'processing' | 'failed';
+  status: 'ready' | 'processing' | 'failed' | 'deleting';
   indexedAt: string;
 };
 
@@ -41,8 +41,9 @@ export function searchDocuments(
   const terms = queryTerms(query);
   if (!terms.length || limit < 1) return [];
 
-  const results = documents.flatMap(({ document, chunks }) =>
-    chunks.flatMap((chunk) => {
+  const results = documents.flatMap(({ document, chunks, status }) => {
+    if (status === 'deleting') return [];
+    return chunks.flatMap((chunk) => {
       const title = document.title.toLocaleLowerCase('ko-KR');
       const haystack = `${title} ${chunk.headingPath.join(' ')} ${chunk.text}`.toLocaleLowerCase('ko-KR');
       const matched = terms.filter((term) => haystack.includes(term));
@@ -57,8 +58,8 @@ export function searchDocuments(
         snippet: chunk.text,
         score: Math.min(0.99, matched.length / terms.length + titleBonus),
       }];
-    }),
-  );
+    });
+  });
 
   return results.toSorted((left, right) => right.score - left.score).slice(0, limit);
 }

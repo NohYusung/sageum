@@ -61,6 +61,17 @@ test('DOCX 제목·문단·목록·표와 제목 계층을 보존한다', async 
     document.blocks.find((block) => block.kind === 'table')?.text ?? '',
     /Access review.*Security Team/u,
   );
+  const chunks = chunkDocument(document, {
+    targetWords: 20,
+    maxWords: 30,
+    overlapWords: 4,
+  });
+  assert.ok(chunks.every((chunk) => {
+    const coveredBlocks = document.blocks.slice(chunk.blockStart, chunk.blockEnd + 1);
+    return coveredBlocks.every((block) =>
+      JSON.stringify(block.headingPath) === JSON.stringify(chunk.headingPath));
+  }));
+  assert.ok(chunks.every((chunk) => chunk.focusBlock === chunk.blockStart));
   assert.equal(parserVersion(document.sourceType), 'docx-v1');
 });
 

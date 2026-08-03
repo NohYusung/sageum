@@ -52,6 +52,7 @@ flowchart LR
   - `documents`: 사용자 소유 문서와 최신 버전
   - `document_versions`: Storage 경로, MIME, 처리 상태, 해시
   - `document_chunks`: 청크 본문과 제목·페이지·시트 위치
+  - `document_deletion_jobs`: 외부 리소스 삭제 상태와 재시도 정보
   - public 테이블에는 RLS를 적용하고 `owner_id = auth.uid()`를 강제합니다.
 - Qdrant
   - 기본 Collection: `document_chunks_qdrant_hybrid_v2`
@@ -84,6 +85,15 @@ flowchart LR
 4. Claude가 검색 근거만 사용해 한국어 답변과 인용 청크 ID를 생성합니다.
 5. 서버가 인용 ID를 검색 결과와 대조하고 유효한 출처만 반환합니다.
 6. Claude 설정이 없거나 호출이 실패하면 검색 원문 기반 답변으로 fallback합니다.
+
+### 문서 삭제
+
+1. 삭제 요청과 `document_deletion_jobs` 등록을 하나의 PostgreSQL 트랜잭션으로 처리합니다.
+2. 삭제 중인 문서는 즉시 일반 검색과 원본 접근에서 제외합니다.
+3. Qdrant 벡터를 `owner_id + document_id` 필터와 strong ordering으로 삭제합니다.
+4. Supabase Storage 원본을 삭제합니다. 이미 없는 원본은 삭제 완료 상태로 취급합니다.
+5. 마지막 PostgreSQL 트랜잭션이 `documents`를 삭제하고 버전·청크·삭제 작업을 cascade 정리합니다.
+6. 외부 삭제가 실패하면 작업을 보존하고 일반 사용자가 화면에서 재시도할 수 있습니다.
 
 ## 기술 스택
 
@@ -157,6 +167,7 @@ npm run dev
 - 이메일 Auth를 활성화합니다.
 - private `documents` Storage bucket을 준비합니다.
 - `documents`, `document_versions`, `document_chunks` 테이블과 사용자별 RLS 정책이 필요합니다.
+- 삭제 정합성 스키마는 `docs/document-deletion-schema.sql`을 적용합니다.
 - Storage와 데이터베이스의 사용자 소유권은 모두 로그인한 `auth.uid()`를 기준으로 제한합니다.
 
 ### Qdrant

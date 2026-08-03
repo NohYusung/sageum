@@ -10,6 +10,7 @@ import {
 const document: StoredDocument = {
   id: 'document-id',
   owner_id: 'owner-id',
+  deletion_status: 'active',
   title: '운영 정책',
   source_type: 'markdown',
   latest_version_id: 'version-id',
@@ -59,10 +60,27 @@ test('Supabase 문서 행을 클라이언트 검색 모델로 복원한다', () 
   assert.equal(indexed.indexedAt, '2026-08-02T00:02:00.000Z');
   assert.deepEqual(indexed.chunks[0].headingPath, ['운영 정책']);
   assert.equal(indexed.chunks[0].blockStart, 1);
+  assert.equal(indexed.chunks[0].focusBlock, 2);
   assert.equal(indexed.chunks[0].location.startOffset, 0);
+});
+
+test('새 청크의 명시적인 이동 블록을 우선한다', () => {
+  const indexed = mapStoredDocument(document, version, [{
+    ...chunk,
+    metadata: { blockStart: 1, blockEnd: 4, focusBlock: 2 },
+  }]);
+
+  assert.equal(indexed.chunks[0].focusBlock, 2);
 });
 
 test('처리 중과 실패 상태를 UI 상태로 변환한다', () => {
   assert.equal(mapStoredDocument(document, { ...version, status: 'parsing' }, []).status, 'processing');
   assert.equal(mapStoredDocument(document, { ...version, status: 'failed' }, []).status, 'failed');
+});
+
+test('삭제 요청된 문서를 삭제 진행 상태로 변환한다', () => {
+  assert.equal(
+    mapStoredDocument({ ...document, deletion_status: 'deleting' }, version, []).status,
+    'deleting',
+  );
 });

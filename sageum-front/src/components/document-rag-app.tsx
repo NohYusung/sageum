@@ -6,6 +6,7 @@ import {
   ChevronRight,
   Cloud,
   Database,
+  Download,
   FileCode2,
   FileSpreadsheet,
   FileText,
@@ -20,11 +21,13 @@ import {
   Send,
   ShieldCheck,
   Sparkles,
+  Trash2,
   UploadCloud,
   XCircle,
 } from 'lucide-react';
 import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { logoutAction } from '@/app/actions';
+import { deleteStoredDocument } from '@/lib/documents/browser-delete';
 import { uploadAndProcessDocument } from '@/lib/documents/browser-upload';
 import type {
   ApiErrorResponse,
@@ -86,6 +89,8 @@ const INITIAL_MESSAGES: ChatMessage[] = [
     text: '문서 저장소에서 근거를 찾아 답변합니다. 재택근무 규정이나 문서 보안 정책처럼 궁금한 내용을 물어보세요.',
   },
 ];
+
+const DOCUMENT_PREVIEW_FRAME_NAME = 'sageum-document-preview';
 
 function SageumMark() {
   return (
@@ -167,6 +172,15 @@ function fileIcon(type: IndexedDocument['document']['sourceType']) {
   return FileText;
 }
 
+function documentPreviewUrl(documentId: string, chunk?: DocumentChunk) {
+  const base = `/documents/${encodeURIComponent(documentId)}/preview?embedded=1`;
+  if (!chunk) return base;
+  if (chunk.location.page !== undefined) {
+    return `${base}&page=${encodeURIComponent(String(chunk.location.page))}`;
+  }
+  return `${base}#block-${chunk.focusBlock}`;
+}
+
 export function DocumentRagApp({
   userEmail,
   initialDocuments,
@@ -185,6 +199,11 @@ export function DocumentRagApp({
   const [activeSources, setActiveSources] = useState<SourceReference[]>([]);
   const [uploadMessage, setUploadMessage] = useState<string | null>(null);
   const [uploadBusy, setUploadBusy] = useState(false);
+  const [deletingDocumentId, setDeletingDocumentId] = useState<string | null>(null);
+  const [documentActionError, setDocumentActionError] = useState<{
+    documentId: string;
+    message: string;
+  } | null>(null);
   const [searchBusy, setSearchBusy] = useState(false);
   const [system, setSystem] = useState<SystemStatus | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -255,6 +274,48 @@ export function DocumentRagApp({
       setUploadMessage(`실패: ${failures.join(' ')}`);
     }
     setUploadBusy(false);
+  }
+
+  async function handleDeleteDocument(item: IndexedDocument) {
+    if (deletingDocumentId) return;
+    const isRetry = item.status === 'deleting';
+    const confirmed = window.confirm(
+      isRetry
+        ? `“${item.document.title}” 문서 삭제를 다시 시도할까요?`
+        : `“${item.document.title}” 문서와 원본 파일, 검색 벡터를 모두 삭제할까요? 이 작업은 되돌릴 수 없습니다.`,
+    );
+    if (!confirmed) return;
+
+    const documentId = item.document.id;
+    setDeletingDocumentId(documentId);
+    setDocumentActionError(null);
+    try {
+      await deleteStoredDocument(documentId);
+      const selectedIndex = documents.findIndex(({ document }) => document.id === documentId);
+      const remainingDocuments = documents.filter(({ document }) => document.id !== documentId);
+      const nextDocument = remainingDocuments[Math.min(selectedIndex, remainingDocuments.length - 1)];
+      setDocuments(remainingDocuments);
+      setSelectedDocumentId(nextDocument?.document.id ?? '');
+      setActiveSources((current) => current.filter((source) => source.documentId !== documentId));
+      setMessages((current) => current.map((message) =>
+        message.sources
+          ? {
+            ...message,
+            sources: message.sources.filter((source) => source.documentId !== documentId),
+          }
+          : message));
+    } catch (error) {
+      setDocuments((current) => current.map((document) =>
+        document.document.id === documentId
+          ? { ...document, status: 'deleting' }
+          : document));
+      setDocumentActionError({
+        documentId,
+        message: error instanceof Error ? error.message : '문서 삭제에 실패했습니다.',
+      });
+    } finally {
+      setDeletingDocumentId(null);
+    }
   }
 
   async function handleQuestion(event: FormEvent<HTMLFormElement>) {
@@ -486,7 +547,9 @@ export function DocumentRagApp({
                       </span>
                       <span className="document-meta">
                         <strong>{item.chunks.length} chunks</strong>
-                        <small>{formatBytes(item.document.sizeBytes)}</small>
+                        <small>
+                          {item.status === 'deleting' ? '삭제 재시도 필요' : formatBytes(item.document.sizeBytes)}
+                        </small>
                       </span>
                       {item.status === 'ready' ? (
                         <CheckCircle2 size={17} className="ready-icon" />
@@ -521,23 +584,91 @@ export function DocumentRagApp({
                     <div><dt>청크</dt><dd>{selectedDocument.chunks.length}</dd></div>
                     <div><dt>인덱싱</dt><dd>{formatDate(selectedDocument.indexedAt)}</dd></div>
                   </dl>
-                  <div className="inspector-rule" />
-                  <h3>구조화 결과</h3>
-                  <div className="structure-list">
-                    {selectedDocument.chunks.slice(0, 4).map((chunk) => (
-                      <div key={chunk.id}>
-                        <span>{chunk.ordinal + 1}</span>
-                        <p>
-                          <strong>{chunk.headingPath.join(' › ') || '본문'}</strong>
-                          <small>
-                            {[chunkLocation(chunk.location), `${chunk.wordCount} words`]
-                              .filter(Boolean)
-                              .join(' · ')}
-                          </small>
-                        </p>
+                  {documentActionError?.documentId === selectedDocument.document.id ? (
+                    <p className="document-action-error" role="alert">
+                      {documentActionError.message}
+                    </p>
+                  ) : null}
+                  <div className="document-preview-sticky">
+                    <div className="document-preview-heading">
+                      <h3>
+                        {selectedDocument.status === 'deleting' ? '삭제 대기 중' : '원본 미리보기'}
+                      </h3>
+                      <div className="document-preview-actions">
+                        {selectedDocument.status !== 'deleting' ? (
+                          <a
+                            className="document-download-action"
+                            href={`/api/documents/${encodeURIComponent(selectedDocument.document.id)}/original?disposition=attachment`}
+                          >
+                            <Download size={14} />
+                            다운로드
+                          </a>
+                        ) : null}
+                        <button
+                          className="document-delete-action"
+                          type="button"
+                          disabled={deletingDocumentId !== null}
+                          onClick={() => handleDeleteDocument(selectedDocument)}
+                        >
+                          {deletingDocumentId === selectedDocument.document.id ? (
+                            <LoaderCircle size={14} className="spin" />
+                          ) : (
+                            <Trash2 size={14} />
+                          )}
+                          {selectedDocument.status === 'deleting' ? '삭제 재시도' : '삭제'}
+                        </button>
                       </div>
-                    ))}
+                    </div>
+                    {selectedDocument.status === 'deleting' ? (
+                      <div className="document-deletion-pending">
+                        <Trash2 size={22} />
+                        <strong>검색에서는 이미 제외됐습니다</strong>
+                        <span>외부 리소스 정리가 실패했다면 삭제 재시도를 눌러 마무리하세요.</span>
+                      </div>
+                    ) : (
+                      <div className="document-preview-frame">
+                        <iframe
+                          key={selectedDocument.document.id}
+                          name={DOCUMENT_PREVIEW_FRAME_NAME}
+                          src={documentPreviewUrl(selectedDocument.document.id)}
+                          title={`${selectedDocument.document.title} 원본 미리보기`}
+                          sandbox={selectedDocument.document.sourceType === 'pdf' ? undefined : ''}
+                          referrerPolicy="no-referrer"
+                        />
+                      </div>
+                    )}
                   </div>
+                  {selectedDocument.status !== 'deleting' ? (
+                    <>
+                      <div className="inspector-rule" />
+                      <div className="structure-heading">
+                        <h3>구조화 결과</h3>
+                        <span>선택하면 원문 위치로 이동합니다</span>
+                      </div>
+                      <div className="structure-list">
+                        {selectedDocument.chunks.map((chunk) => (
+                          <a
+                            href={documentPreviewUrl(selectedDocument.document.id, chunk)}
+                            key={chunk.id}
+                            target={DOCUMENT_PREVIEW_FRAME_NAME}
+                          >
+                            <span>{chunk.ordinal + 1}</span>
+                            <p>
+                              <strong>{chunk.headingPath.join(' › ') || '본문'}</strong>
+                              <small>
+                                {[chunkLocation(chunk.location), `${chunk.wordCount} words`]
+                                  .filter(Boolean)
+                                  .join(' · ')}
+                              </small>
+                            </p>
+                          </a>
+                        ))}
+                        {!selectedDocument.chunks.length ? (
+                          <p className="structure-list-empty">구조화된 본문 위치가 없습니다.</p>
+                        ) : null}
+                      </div>
+                    </>
+                  ) : null}
                 </aside>
               ) : null}
             </div>

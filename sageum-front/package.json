@@ -13,9 +13,11 @@
     "typecheck": "tsc --noEmit",
     "qdrant:setup": "node --env-file=.env.local --import tsx scripts/setup-qdrant.ts",
     "qdrant:reindex": "node --env-file=.env.local --import tsx scripts/reindex-qdrant.ts",
-    "qdrant:smoke": "node --env-file=.env.local --import tsx scripts/smoke-qdrant.ts"
+    "qdrant:smoke": "node --env-file=.env.local --import tsx scripts/smoke-qdrant.ts",
+    "claude:smoke": "node --env-file=.env.local --import tsx scripts/smoke-claude-aws.ts"
   },
   "dependencies": {
+    "@anthropic-ai/aws-sdk": "0.6.1",
     "@qdrant/js-client-rest": "1.18.0",
     "@supabase/ssr": "0.12.4",
     "@supabase/supabase-js": "2.111.0",

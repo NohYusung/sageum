@@ -1,6 +1,7 @@
 export const DEFAULT_QDRANT_INFERENCE_MODEL = 'intfloat/multilingual-e5-small';
 export const DEFAULT_QDRANT_INFERENCE_DIMENSIONS = 384;
 export const DEFAULT_QDRANT_COLLECTION = 'document_chunks_qdrant_hybrid_v2';
+export const DEFAULT_CLAUDE_AWS_MODEL = 'claude-haiku-4-5';
 
 export type ProviderConfiguration = {
   supabase: {
@@ -18,6 +19,13 @@ export type ProviderConfiguration = {
     execution: 'qdrant';
     dtype: null;
   };
+  generation: {
+    configured: boolean;
+    provider: 'claude-platform-aws';
+    model: string;
+    region: string | null;
+    auth: 'api-key' | 'sigv4' | null;
+  };
 };
 
 function value(name: string) {
@@ -34,6 +42,19 @@ export function getProviderConfiguration(): ProviderConfiguration {
     ? requestedDimensions
     : DEFAULT_QDRANT_INFERENCE_DIMENSIONS;
   const model = value('QDRANT_INFERENCE_MODEL') ?? DEFAULT_QDRANT_INFERENCE_MODEL;
+  const claudeAwsRegion = value('AWS_REGION') ?? value('AWS_DEFAULT_REGION');
+  const claudeAwsWorkspaceId = value('ANTHROPIC_AWS_WORKSPACE_ID');
+  const hasClaudeAwsApiKey = Boolean(value('ANTHROPIC_AWS_API_KEY'));
+  const hasClaudeAwsSigV4Credentials = Boolean(
+    (value('AWS_ACCESS_KEY_ID') && value('AWS_SECRET_ACCESS_KEY'))
+      || value('AWS_PROFILE')
+      || (value('AWS_WEB_IDENTITY_TOKEN_FILE') && value('AWS_ROLE_ARN')),
+  );
+  const claudeAwsAuth = hasClaudeAwsApiKey
+    ? 'api-key'
+    : hasClaudeAwsSigV4Credentials
+      ? 'sigv4'
+      : null;
 
   return {
     supabase: {
@@ -53,6 +74,13 @@ export function getProviderConfiguration(): ProviderConfiguration {
       dimensions,
       execution: 'qdrant',
       dtype: null,
+    },
+    generation: {
+      configured: Boolean(claudeAwsRegion && claudeAwsWorkspaceId && claudeAwsAuth),
+      provider: 'claude-platform-aws',
+      model: value('CLAUDE_AWS_MODEL') ?? DEFAULT_CLAUDE_AWS_MODEL,
+      region: claudeAwsRegion,
+      auth: claudeAwsAuth,
     },
   };
 }

@@ -2,6 +2,7 @@ import type { SearchDocumentsResponse } from '@/lib/documents/contracts';
 import { composeExtractiveAnswer, type SourceReference } from '@/lib/rag/local-search';
 import { parseSearchRequest, SearchRequestError } from '@/lib/rag/search-request';
 import { getAuthenticatedRequestContext } from '@/lib/server/api-auth';
+import { generateClaudeGroundedAnswer } from '@/lib/server/claude-rag-answer';
 import { getProviderConfiguration } from '@/lib/server/env';
 import {
   getQdrantVectorStore,
@@ -70,10 +71,28 @@ export async function POST(request: Request) {
       sheet: result.sheet,
       cellRange: result.cellRange,
     }));
+    let answer = composeExtractiveAnswer(sources);
+    let answerSources = sources;
+    let answerMode: SearchDocumentsResponse['answerMode'] = 'extractive-fallback';
+
+    if (sources.length && configuration.generation.configured) {
+      try {
+        const generated = await generateClaudeGroundedAnswer(search.query, sources);
+        answer = generated.answer;
+        answerSources = generated.sources;
+        answerMode = 'claude-platform-aws';
+      } catch (error) {
+        const message = error instanceof Error ? error.message : '알 수 없는 오류';
+        console.error(`Claude Platform on AWS answer generation failed: ${message}`);
+        answer = `Claude 답변 생성에 실패하여 검색된 원문을 대신 표시합니다. ${answer}`;
+      }
+    }
+
     const response = {
-      answer: composeExtractiveAnswer(sources),
-      sources,
+      answer,
+      sources: answerSources,
       mode: 'qdrant',
+      answerMode,
     } satisfies SearchDocumentsResponse;
     return Response.json(response);
   } catch (error) {

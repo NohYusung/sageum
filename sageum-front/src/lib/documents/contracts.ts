@@ -20,6 +20,7 @@ export type SearchDocumentsResponse = {
   answer: string;
   sources: SourceReference[];
   mode: 'qdrant';
+  answerMode: 'claude-platform-aws' | 'extractive-fallback';
 };
 
 export type ApiErrorResponse = {

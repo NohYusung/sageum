@@ -60,6 +60,13 @@ type SystemStatus = {
       execution: 'qdrant';
       dtype: string | null;
     };
+    generation: {
+      configured: boolean;
+      provider: 'claude-platform-aws';
+      model: string;
+      region: string | null;
+      auth: 'api-key' | 'sigv4' | null;
+    };
   };
 };
 
@@ -341,6 +348,11 @@ export function DocumentRagApp({
             Qdrant
             <em>{system?.providers.qdrant.configured ? '연결됨' : '대기'}</em>
           </div>
+          <div className="provider-row">
+            <i className={system?.providers.generation.configured ? 'connected' : ''} />
+            Claude on AWS
+            <em>{system?.providers.generation.configured ? '활성' : '대기'}</em>
+          </div>
         </div>
 
         <div className="rag-profile">
@@ -425,7 +437,7 @@ export function DocumentRagApp({
                   {searchBusy ? <LoaderCircle size={18} className="spin" /> : <Send size={18} />}
                 </button>
               </form>
-              <p>질문 임베딩과 하이브리드 검색은 Qdrant가 처리합니다.</p>
+              <p>Qdrant가 근거를 검색하고 Claude Platform on AWS가 답변을 생성합니다.</p>
             </div>
           </section>
         ) : null}

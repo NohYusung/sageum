@@ -237,7 +237,7 @@ npm run claude:smoke
 ## 프로젝트 구조
 
 ```text
-sageum-agent/
+sageum/
 ├── sageum-front/                 # 현재 RAG 제품 경로
 │   ├── scripts/                  # Qdrant·Claude setup/smoke/reindex
 │   ├── src/app/api/              # 문서 처리·검색 Route Handler

@@ -2,7 +2,7 @@ from setuptools import find_packages, setup
 
 
 setup(
-    name="sageum-agent",
+    name="sageum",
     version="0.1.0",
     description="Sageum curriculum generation worker",
     packages=find_packages(include=["sageum_agent", "sageum_agent.*"]),

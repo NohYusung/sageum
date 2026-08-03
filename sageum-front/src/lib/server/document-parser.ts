@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { load } from 'cheerio';
 import mammoth from 'mammoth';
 import readXlsxFile from 'read-excel-file/node';
@@ -225,4 +226,15 @@ export async function parseDocumentSource(
   if (metadata.sourceType === 'xlsx') return parseXlsx(bytes, normalizedInput);
 
   return parseTextDocumentSource(new TextDecoder('utf-8').decode(bytes), normalizedInput);
+}
+
+export async function parseDocumentSourceWithHash(
+  bytes: Uint8Array,
+  input: ParseDocumentInput,
+) {
+  // PDF.js can transfer the supplied Uint8Array to a worker and detach its buffer.
+  // Calculate the content hash before the parser takes ownership of the bytes.
+  const contentHash = createHash('sha256').update(bytes).digest('hex');
+  const document = await parseDocumentSource(bytes, input);
+  return { document, contentHash };
 }

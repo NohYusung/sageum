@@ -2,7 +2,11 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import { chunkDocument } from '@/lib/rag/chunker';
-import { parseDocumentSource, parserVersion } from './document-parser';
+import {
+  parseDocumentSource,
+  parseDocumentSourceWithHash,
+  parserVersion,
+} from './document-parser';
 
 const FIXTURES = new URL('../../../test/fixtures/', import.meta.url);
 
@@ -33,6 +37,20 @@ test('PDF를 페이지별 블록과 페이지 경계 청크로 변환한다', as
   assert.deepEqual(new Set(chunks.map((chunk) => chunk.location.page)), new Set([1, 2]));
   assert.ok(chunks.every((chunk) => chunk.location.page !== undefined));
   assert.equal(parserVersion(document.sourceType), 'pdf-v1');
+});
+
+test('PDF 파서가 입력 버퍼를 분리해도 파싱 전에 원본 해시를 보존한다', async () => {
+  const bytes = await fixture('sample-policy.pdf');
+  const sizeBytes = bytes.byteLength;
+  const { document, contentHash } = await parseDocumentSourceWithHash(bytes, {
+    name: 'sample-policy.pdf',
+    mimeType: 'application/pdf',
+    sizeBytes,
+  });
+
+  assert.equal(document.sourceType, 'pdf');
+  assert.equal(contentHash, '3d9e98fd9cd9d074217be8f26b5733c6944f0be18a8645f6a9b836ae88d824d8');
+  assert.equal(bytes.buffer.byteLength, 0);
 });
 
 test('DOCX 제목·문단·목록·표와 제목 계층을 보존한다', async () => {

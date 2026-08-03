@@ -1,5 +1,3 @@
-import { createHash } from 'node:crypto';
-import type { SupabaseClient } from '@supabase/supabase-js';
 import type { ProcessDocumentResponse } from '@/lib/documents/contracts';
 import { DOCUMENT_BUCKET, DocumentValidationError } from '@/lib/documents/validation';
 import { CHUNKER_VERSION, chunkDocument } from '@/lib/rag/chunker';
@@ -7,16 +5,17 @@ import type { IndexedDocument } from '@/lib/rag/local-search';
 import { getAuthenticatedRequestContext } from '@/lib/server/api-auth';
 import {
   DocumentParsingError,
-  parseDocumentSource,
+  parseDocumentSourceWithHash,
   parserVersion,
 } from '@/lib/server/document-parser';
+import { cleanupFailedDocumentVersion } from '@/lib/server/document-processing-failure';
 import { getProviderConfiguration } from '@/lib/server/env';
 import {
   getQdrantVectorStore,
   QdrantConfigurationError,
   QdrantInferenceError,
 } from '@/lib/server/qdrant-store';
-import type { Database, TablesInsert } from '@/lib/supabase/database.types';
+import type { TablesInsert } from '@/lib/supabase/database.types';
 
 export const runtime = 'nodejs';
 
@@ -27,20 +26,6 @@ class ProcessingError extends Error {
     super(message);
     this.name = 'ProcessingError';
   }
-}
-
-async function markVersionFailed(
-  supabase: SupabaseClient<Database>,
-  ownerId: string,
-  versionId: string,
-  message: string,
-) {
-  const { error } = await supabase
-    .from('document_versions')
-    .update({ status: 'failed', error_message: message.slice(0, 500) })
-    .eq('id', versionId)
-    .eq('owner_id', ownerId);
-  if (error) console.error('Failed to mark document version as failed', error);
 }
 
 export async function POST(
@@ -120,13 +105,16 @@ export async function POST(
     if (fileBuffer.byteLength !== version.size_bytes) {
       throw new ProcessingError('업로드된 원본 파일 크기가 요청 정보와 일치하지 않습니다.', 422);
     }
-    const parsed = await parseDocumentSource(new Uint8Array(fileBuffer), {
-      name: version.original_filename,
-      mimeType: version.mime_type,
-      sizeBytes: version.size_bytes,
-      documentId,
-      versionId,
-    });
+    const { document: parsed, contentHash } = await parseDocumentSourceWithHash(
+      new Uint8Array(fileBuffer),
+      {
+        name: version.original_filename,
+        mimeType: version.mime_type,
+        sizeBytes: version.size_bytes,
+        documentId,
+        versionId,
+      },
+    );
     const chunks = chunkDocument(parsed);
     if (!chunks.length) {
       throw new ProcessingError('검색 가능한 본문이 없는 문서입니다.', 422);
@@ -195,7 +183,6 @@ export async function POST(
     if (chunksError) throw new ProcessingError('문서 청크를 저장하지 못했습니다.');
 
     const processedAt = new Date().toISOString();
-    const contentHash = createHash('sha256').update(new Uint8Array(fileBuffer)).digest('hex');
     const { error: documentUpdateError } = await context.supabase
       .from('documents')
       .update({
@@ -265,7 +252,24 @@ export async function POST(
         ? 422
         : 500;
     console.error('Document processing failed', error);
-    await markVersionFailed(context.supabase, context.ownerId, versionId, publicError);
+    await cleanupFailedDocumentVersion(publicError, {
+      deleteChunks: async () => {
+        const { error: chunkCleanupError } = await context.supabase
+          .from('document_chunks')
+          .delete()
+          .eq('version_id', versionId)
+          .eq('owner_id', context.ownerId);
+        if (chunkCleanupError) throw chunkCleanupError;
+      },
+      markFailed: async (message) => {
+        const { error: versionFailureError } = await context.supabase
+          .from('document_versions')
+          .update({ status: 'failed', error_message: message.slice(0, 500) })
+          .eq('id', versionId)
+          .eq('owner_id', context.ownerId);
+        if (versionFailureError) throw versionFailureError;
+      },
+    });
     return Response.json({ error: publicError }, { status });
   }
 }

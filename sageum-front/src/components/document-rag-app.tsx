@@ -25,7 +25,14 @@ import {
   UploadCloud,
   XCircle,
 } from 'lucide-react';
-import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  type FormEvent,
+  type KeyboardEvent,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { logoutAction } from '@/app/actions';
 import { deleteStoredDocument } from '@/lib/documents/browser-delete';
 import { uploadAndProcessDocument } from '@/lib/documents/browser-upload';
@@ -33,6 +40,7 @@ import type {
   ApiErrorResponse,
   SearchDocumentsResponse,
 } from '@/lib/documents/contracts';
+import { shouldSubmitChatOnEnter } from '@/lib/rag/chat-keyboard';
 import {
   composeExtractiveAnswer,
   searchDocuments,
@@ -359,6 +367,17 @@ export function DocumentRagApp({
     }
   }
 
+  function handleQuestionKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (!shouldSubmitChatOnEnter(
+      event.key,
+      event.shiftKey,
+      event.nativeEvent.isComposing,
+    )) return;
+
+    event.preventDefault();
+    event.currentTarget.form?.requestSubmit();
+  }
+
   function openSource(source: SourceReference) {
     setSelectedDocumentId(source.documentId);
     setView('documents');
@@ -485,6 +504,7 @@ export function DocumentRagApp({
                 <textarea
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
+                  onKeyDown={handleQuestionKeyDown}
                   placeholder="예: 재택근무는 일주일에 몇 번 가능한가요?"
                   rows={1}
                   disabled={searchBusy}

@@ -21,6 +21,8 @@ function segmentKey(document: NormalizedDocument, blockIndex: number) {
     ? `page:${location.page}`
     : location.sheet
       ? `sheet:${location.sheet}:range:${location.cellRange ?? ''}`
+      : location.imageIndex !== undefined
+        ? `image:${location.imageIndex}`
       : 'document';
   return `${locationKey}:heading:${JSON.stringify(block.headingPath)}`;
 }
@@ -116,11 +118,13 @@ export function chunkDocument(
         headingPath: firstBlock.headingPath.length ? firstBlock.headingPath : lastBlock.headingPath,
         blockStart: firstBlockIndex,
         blockEnd: lastBlockIndex,
-        focusBlock: firstBlockIndex,
+        focusBlock: firstBlock.location.previewBlock ?? firstBlockIndex,
         location: {
           page: firstBlock.location.page ?? lastBlock.location.page,
           sheet: firstBlock.location.sheet ?? lastBlock.location.sheet,
           cellRange: firstBlock.location.cellRange ?? lastBlock.location.cellRange,
+          imageIndex: firstBlock.location.imageIndex ?? lastBlock.location.imageIndex,
+          previewBlock: firstBlock.location.previewBlock ?? lastBlock.location.previewBlock,
           startOffset: firstBlock.location.startOffset,
           endOffset: lastBlock.location.endOffset,
         },

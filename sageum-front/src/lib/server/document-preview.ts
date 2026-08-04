@@ -119,7 +119,7 @@ function annotatePreviewBlocks(
     if (
       hasNestedCandidate
       || selection.parents('table,ul,ol').length
-      || !selection.text().replace(/\s+/gu, ' ').trim()
+      || (!selection.text().replace(/\s+/gu, ' ').trim() && !selection.find('img').length)
     ) {
       return;
     }

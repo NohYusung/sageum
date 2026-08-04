@@ -18,6 +18,7 @@ import {
   Home,
   HardDriveUpload,
   Library,
+  Link2,
   LoaderCircle,
   LogOut,
   MessageSquareText,
@@ -31,6 +32,7 @@ import {
   UploadCloud,
   XCircle,
 } from 'lucide-react';
+import Link from 'next/link';
 import {
   type FormEvent,
   type DragEvent,
@@ -153,12 +155,14 @@ function chunkLocation(location: DocumentChunk['location']) {
   if (location.sheet) {
     return location.cellRange ? `${location.sheet} · ${location.cellRange}` : location.sheet;
   }
+  if (location.imageIndex !== undefined) return `이미지 ${location.imageIndex}`;
   return null;
 }
 
 function sourceLocation(source: SourceReference) {
   if (source.page !== undefined) return `${source.page}페이지`;
   if (source.sheet) return source.cellRange ? `${source.sheet} · ${source.cellRange}` : source.sheet;
+  if (source.imageIndex !== undefined) return `이미지 ${source.imageIndex}`;
   return null;
 }
 
@@ -614,6 +618,9 @@ export function DocumentRagApp({
             <strong title={userEmail}>{userEmail}</strong>
             <span>{system?.mode === 'cloud' ? 'Cloud mode' : '개인 데모'}</span>
           </div>
+          <Link href="/oauth/connections" aria-label="에이전트 연결 관리" title="에이전트 연결 관리">
+            <Link2 size={16} />
+          </Link>
           <form action={logoutAction}>
             <button type="submit" aria-label="로그아웃" title="로그아웃">
               <LogOut size={16} />

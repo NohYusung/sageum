@@ -13,6 +13,7 @@
 - 중첩 가능한 가상 폴더와 문서·폴더 드래그 이동
 - 폴더를 지정한 직접 업로드와 하위 폴더 포함 RAG 검색
 - MD, TXT, HTML, PDF, DOCX, XLSX 업로드
+- Claude Vision 기반 PDF 시각 자료·DOCX/XLSX/HTML 내장 이미지 OCR와 의미 설명
 - 형식별 구조 보존
   - PDF: 페이지
   - DOCX: 제목 계층, 문단, 목록, 표
@@ -27,6 +28,7 @@
 - Claude가 반환한 인용 ID를 실제 검색 청크와 다시 대조
 - 근거가 없거나 유효한 인용이 없으면 답변 생성 거부
 - 답변과 함께 문서명, 제목 경로, 페이지, 시트·셀 범위 표시
+- Supabase OAuth 2.1로 보호된 사용자별 읽기 전용 원격 MCP와 6개 저장소 도구
 
 ## 아키텍처
 
@@ -40,8 +42,13 @@ flowchart LR
   N -->|"청크 색인"| Q["Qdrant Cloud Inference"]
   Q -->|"dense + BM25 검색 근거"| N
   N -->|"질문 + 제한된 근거"| C["Claude Platform on AWS"]
+  N -->|"PDF·내장 이미지 OCR/설명"| C
   C -->|"구조화 답변 + chunkId 인용"| N
   N -->|"답변 + 검증된 출처"| U
+  A["외부 MCP 에이전트"] -->|"OAuth 2.1 + Streamable HTTP"| M["/api/mcp"]
+  M -->|"OAuth 탐색·사용자 동의"| SA["Supabase Auth"]
+  M -->|"owner_id 제한 검색"| Q
+  M -->|"문서·폴더·원본 조회"| P
 ```
 
 ### 저장 책임
@@ -75,10 +82,21 @@ flowchart LR
 2. Supabase에 문서와 버전을 만들고 signed upload URL을 발급합니다.
 3. 브라우저가 원본을 private Storage에 직접 업로드합니다.
 4. Next.js 서버가 원본을 내려받아 형식별 파서로 구조를 추출합니다.
-5. 구조와 위치 경계를 유지하면서 단어 수 기준으로 청킹합니다.
-6. PostgreSQL에 청크를 저장합니다.
-7. Qdrant Cloud Inference로 dense·sparse 벡터를 생성하고 색인합니다.
-8. 전체 과정이 끝나면 문서 버전을 `ready`로 전환합니다.
+5. PDF 시각 자료와 DOCX/XLSX/HTML 내장 이미지를 Claude Vision으로 OCR·설명합니다.
+6. OCR 결과를 페이지·시트·이미지 위치가 있는 `image` 블록으로 합칩니다.
+7. 구조와 위치 경계를 유지하면서 단어 수 기준으로 청킹합니다.
+8. PostgreSQL에 청크를 저장합니다.
+9. Qdrant Cloud Inference로 dense·sparse 벡터를 생성하고 색인합니다.
+10. 전체 과정이 끝나면 문서 버전을 `ready`로 전환합니다.
+
+### 이미지 OCR
+
+1. PDF는 Claude의 PDF 시각 입력으로 페이지별 스캔·표·차트·구조도를 분석합니다.
+2. DOCX는 Mammoth가 복원한 내장 이미지와 제목 경로·미리보기 블록을 연결합니다.
+3. XLSX는 Drawing relationship을 따라 이미지의 시트와 시작 셀을 보존합니다.
+4. HTML은 업로드 파일 안의 `data:image/*;base64` 이미지만 처리하고 외부 URL은 가져오지 않습니다.
+5. 보이는 글자, 이미지 설명, 구성요소 관계와 핵심 사실을 하나의 검색 블록으로 만듭니다.
+6. OCR 호출이 실패하면 기존 텍스트 파싱은 유지하고 버전 metadata에 실패 상태를 기록합니다.
 
 ### 폴더 관리
 
@@ -97,6 +115,17 @@ flowchart LR
 4. Claude가 검색 근거만 사용해 한국어 답변과 인용 청크 ID를 생성합니다.
 5. 서버가 인용 ID를 검색 결과와 대조하고 유효한 출처만 반환합니다.
 6. Claude 설정이 없거나 호출이 실패하면 검색 원문 기반 답변으로 fallback합니다.
+
+### 외부 에이전트 MCP
+
+1. 원격 엔드포인트는 `/api/mcp`이며 stateless Streamable HTTP POST를 사용합니다.
+2. MCP 보호 리소스 메타데이터가 Supabase OAuth 2.1 Authorization Server를 안내합니다.
+3. 외부 에이전트는 브라우저에서 Sageum 로그인과 사용자 동의를 완료하고 Access Token을 발급받습니다.
+4. 서버는 JWT 서명·발급자·만료·`client_id`를 검증하고 `sub`를 문서 `owner_id`로 사용합니다.
+5. DB 조회는 OAuth Access Token과 기존 RLS를 사용하며 Qdrant에도 검증된 `owner_id` 필터를 강제합니다.
+6. `search_repository`는 웹 챗봇과 같은 Qdrant dense + BM25 검색 근거를 반환합니다.
+7. `list_folders`, `list_documents`, `get_document`, `get_chunk`, `get_original_link`를 읽기 전용으로 제공합니다.
+8. 외부 에이전트가 검색 근거를 직접 판단하며 Sageum의 Claude 답변을 중복 호출하지 않습니다.
 
 ### 문서 삭제
 
@@ -157,11 +186,18 @@ ANTHROPIC_AWS_WORKSPACE_ID=wrkspc_example
 AWS_REGION=ap-northeast-2
 ANTHROPIC_AWS_API_KEY=your-claude-platform-aws-api-key
 CLAUDE_AWS_MODEL=claude-haiku-4-5
+
+# OAuth-protected read-only MCP
+SAGEUM_MCP_ALLOWED_ORIGINS=
+SAGEUM_MCP_URL=http://localhost:3000/api/mcp
+SAGEUM_MCP_ACCESS_TOKEN=
 ```
 
 - `NEXT_PUBLIC_` 접두사는 브라우저에 공개해도 되는 Supabase 값에만 사용합니다.
 - Supabase secret, Qdrant API key, Claude API key는 서버 환경변수로만 저장합니다.
 - Claude workspace의 생성 리전과 `AWS_REGION`이 일치해야 합니다.
+- `SAGEUM_MCP_ACCESS_TOKEN`은 로컬 스모크 테스트용 단기 OAuth 토큰이며 Vercel에는 설정하지 않습니다.
+- MCP의 실제 사용자 범위는 검증된 Supabase OAuth JWT의 `sub`에서 결정됩니다.
 
 ### 개발 서버
 
@@ -177,6 +213,11 @@ npm run dev
 ### Supabase
 
 - 이메일 Auth를 활성화합니다.
+- **Authentication > OAuth Server**에서 OAuth 2.1 Server를 활성화합니다.
+- Authorization Path는 `/oauth/consent`로 설정합니다.
+- 외부 MCP 클라이언트의 자동 연결이 필요하면 Dynamic Client Registration을 활성화합니다.
+- OAuth 동의 화면은 Sageum의 `/oauth/consent`가 제공하며 사용자는 연결을 명시적으로 승인하거나 거부합니다.
+- `openid` scope를 사용할 경우 JWT Signing Key를 RS256 또는 ES256으로 전환합니다.
 - private `documents` Storage bucket을 준비합니다.
 - `documents`, `document_versions`, `document_chunks` 테이블과 사용자별 RLS 정책이 필요합니다.
 - 삭제 정합성 스키마는 `docs/document-deletion-schema.sql`을 적용합니다.
@@ -235,6 +276,18 @@ npm run claude:smoke
 - 합성 한국어 근거로 구조화 답변과 정확한 `chunkId` 인용을 확인합니다.
 - 실제 사용자 문서나 API 키를 출력하지 않습니다.
 
+### MCP 스모크 테스트
+
+```bash
+npm run mcp:smoke
+npm run mcp:smoke -- "환경 변수 명세는 무엇인가?"
+```
+
+- OAuth로 발급한 단기 Access Token을 `SAGEUM_MCP_ACCESS_TOKEN`에 넣습니다.
+- 첫 명령은 OAuth 인증, 프로토콜 연결, 읽기 전용 도구 6개를 확인합니다.
+- 질문을 추가하면 실제 Qdrant 저장소 검색까지 확인합니다.
+- OAuth 지원 외부 에이전트에는 `https://sageum.vercel.app/api/mcp` URL만 등록하면 브라우저 승인이 시작됩니다.
+
 ## 배포
 
 - `sageum-front`를 Vercel 프로젝트의 Root Directory로 지정합니다.
@@ -248,11 +301,13 @@ npm run claude:smoke
   4. Qdrant 색인
   5. 문서 질문과 Claude 답변
   6. 페이지·시트 위치가 포함된 출처 표시
+  7. `/api/mcp` OAuth 브라우저 승인과 저장소 검색
 
 ## 현재 제한사항
 
-- OCR은 아직 지원하지 않습니다. 스캔 이미지로만 구성된 PDF는 텍스트를 추출하지 못할 수 있습니다.
-- 문서 내부 이미지는 임베딩 대상이 아닙니다.
+- OCR은 JPEG, PNG, GIF, WebP 내장 이미지를 지원하며 SVG, EMF, WMF는 건너뜁니다.
+- HTML의 외부 이미지 URL과 Markdown의 별도 첨부 이미지는 원본 파일에 포함되지 않으므로 OCR하지 않습니다.
+- PDF 전체와 이미지 OCR은 Claude Vision 입력 토큰을 사용합니다.
 - 각 질문은 독립적으로 검색합니다. 대화 이력을 이용한 후속 질문 재작성은 아직 없습니다.
 - 답변은 스트리밍하지 않고 완성된 구조화 결과를 한 번에 반환합니다.
 - RAG 정답 세트와 자동 품질 평가는 아직 추가되지 않았습니다.
@@ -280,7 +335,6 @@ sageum/
 - 대화 이력을 이용한 후속 질문 재작성
 - 검색 품질에 따른 reranker 도입 검토
 - Vercel 배포 환경 E2E 검증
-- 스캔 PDF와 이미지 OCR
 - 답변 스트리밍
 
 ## 라이선스

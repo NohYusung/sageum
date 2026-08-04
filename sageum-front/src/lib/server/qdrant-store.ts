@@ -25,6 +25,7 @@ export type VectorSearchResult = {
   page?: number;
   sheet?: string;
   cellRange?: string;
+  imageIndex?: number;
 };
 
 export type VectorSearchOptions = {
@@ -220,6 +221,7 @@ export class QdrantVectorStore {
                 page: chunk.location.page,
                 sheet: chunk.location.sheet,
                 cell_range: chunk.location.cellRange,
+                image_index: chunk.location.imageIndex,
               },
             };
           }),
@@ -291,6 +293,7 @@ export class QdrantVectorStore {
           'page',
           'sheet',
           'cell_range',
+          'image_index',
         ],
       });
     } catch (error) {
@@ -318,6 +321,7 @@ export class QdrantVectorStore {
         page: typeof payload?.page === 'number' ? payload.page : undefined,
         sheet: typeof payload?.sheet === 'string' ? payload.sheet : undefined,
         cellRange: typeof payload?.cell_range === 'string' ? payload.cell_range : undefined,
+        imageIndex: typeof payload?.image_index === 'number' ? payload.image_index : undefined,
       };
     });
   }

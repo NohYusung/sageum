@@ -15,6 +15,7 @@ import {
   QdrantConfigurationError,
   QdrantInferenceError,
 } from '@/lib/server/qdrant-store';
+import { enrichDocumentWithVisualOcr, VISUAL_OCR_VERSION } from '@/lib/server/visual-ocr';
 import type { TablesInsert } from '@/lib/supabase/database.types';
 
 export const runtime = 'nodejs';
@@ -105,7 +106,7 @@ export async function POST(
     if (fileBuffer.byteLength !== version.size_bytes) {
       throw new ProcessingError('업로드된 원본 파일 크기가 요청 정보와 일치하지 않습니다.', 422);
     }
-    const { document: parsed, contentHash } = await parseDocumentSourceWithHash(
+    const { document: parsedDocument, contentHash } = await parseDocumentSourceWithHash(
       new Uint8Array(fileBuffer),
       {
         name: version.original_filename,
@@ -114,6 +115,10 @@ export async function POST(
         documentId,
         versionId,
       },
+    );
+    const { document: parsed, report: visualOcr } = await enrichDocumentWithVisualOcr(
+      new Uint8Array(fileBuffer),
+      parsedDocument,
     );
     const chunks = chunkDocument(parsed);
     if (!chunks.length) {
@@ -175,6 +180,8 @@ export async function POST(
         blockStart: chunk.blockStart,
         blockEnd: chunk.blockEnd,
         focusBlock: chunk.focusBlock,
+        imageIndex: chunk.location.imageIndex ?? null,
+        previewBlock: chunk.location.previewBlock ?? null,
       },
     }));
     const { error: chunksError } = await context.supabase
@@ -206,6 +213,11 @@ export async function POST(
       embeddingProvider: vectorIndexEnabled ? providers.embedding.provider : null,
       embeddingModel: vectorIndexEnabled ? providers.embedding.model : null,
       embeddingDimensions: vectorIndexEnabled ? providers.embedding.dimensions : null,
+      visualOcr: {
+        version: VISUAL_OCR_VERSION,
+        ...visualOcr,
+        warning: visualOcr.warning ?? null,
+      },
     };
     const { error: versionUpdateError } = await context.supabase
       .from('document_versions')

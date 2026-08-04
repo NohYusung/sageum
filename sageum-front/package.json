@@ -14,21 +14,25 @@
     "qdrant:setup": "node --env-file=.env.local --import tsx scripts/setup-qdrant.ts",
     "qdrant:reindex": "node --env-file=.env.local --import tsx scripts/reindex-qdrant.ts",
     "qdrant:smoke": "node --env-file=.env.local --import tsx scripts/smoke-qdrant.ts",
-    "claude:smoke": "node --env-file=.env.local --import tsx scripts/smoke-claude-aws.ts"
+    "claude:smoke": "node --env-file=.env.local --import tsx scripts/smoke-claude-aws.ts",
+    "mcp:smoke": "node --env-file=.env.local --import tsx scripts/smoke-mcp.ts"
   },
   "dependencies": {
     "@anthropic-ai/aws-sdk": "0.6.1",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@qdrant/js-client-rest": "1.18.0",
     "@supabase/ssr": "0.12.4",
     "@supabase/supabase-js": "2.111.0",
     "cheerio": "1.2.0",
+    "jszip": "^3.10.1",
     "lucide-react": "^0.468.0",
     "mammoth": "1.12.0",
     "next": "16.2.11",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "read-excel-file": "9.3.5",
-    "unpdf": "1.8.0"
+    "unpdf": "1.8.0",
+    "zod": "^4.1.12"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

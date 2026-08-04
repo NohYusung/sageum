@@ -49,6 +49,7 @@ type PromptSource = {
   page?: number;
   sheet?: string;
   cellRange?: string;
+  imageIndex?: number;
   content: string;
 };
 
@@ -93,6 +94,7 @@ export function buildClaudeGroundingContext(sources: SourceReference[]) {
       page: source.page,
       sheet: source.sheet,
       cellRange: source.cellRange,
+      imageIndex: source.imageIndex,
       content,
     });
     remainingCharacters -= content.length;

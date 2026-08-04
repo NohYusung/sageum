@@ -75,6 +75,8 @@ export function mapStoredDocument(
           page: chunk.page ?? undefined,
           sheet: chunk.sheet ?? undefined,
           cellRange: chunk.cell_range ?? undefined,
+          imageIndex: metadataNumber(chunk.metadata, 'imageIndex'),
+          previewBlock: metadataNumber(chunk.metadata, 'previewBlock'),
           startOffset: chunk.start_offset ?? undefined,
           endOffset: chunk.end_offset ?? undefined,
         },

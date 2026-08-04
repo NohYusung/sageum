@@ -18,6 +18,7 @@ export type SourceReference = {
   page?: number;
   sheet?: string;
   cellRange?: string;
+  imageIndex?: number;
 };
 
 function queryTerms(query: string) {
@@ -57,6 +58,10 @@ export function searchDocuments(
         heading: chunk.headingPath.join(' › ') || '본문',
         snippet: chunk.text,
         score: Math.min(0.99, matched.length / terms.length + titleBonus),
+        page: chunk.location.page,
+        sheet: chunk.location.sheet,
+        cellRange: chunk.location.cellRange,
+        imageIndex: chunk.location.imageIndex,
       }];
     });
   });

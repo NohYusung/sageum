@@ -129,6 +129,7 @@ export async function POST(request: Request) {
       page: result.page,
       sheet: result.sheet,
       cellRange: result.cellRange,
+      imageIndex: result.imageIndex,
     }));
     let answer = composeExtractiveAnswer(sources);
     let answerSources = sources;

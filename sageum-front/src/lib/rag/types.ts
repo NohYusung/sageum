@@ -4,13 +4,15 @@ export type DocumentLocation = {
   page?: number;
   sheet?: string;
   cellRange?: string;
+  imageIndex?: number;
+  previewBlock?: number;
   startOffset?: number;
   endOffset?: number;
 };
 
 export type NormalizedBlock = {
   id: string;
-  kind: 'heading' | 'paragraph' | 'list' | 'table';
+  kind: 'heading' | 'paragraph' | 'list' | 'table' | 'image';
   text: string;
   headingPath: string[];
   location: DocumentLocation;

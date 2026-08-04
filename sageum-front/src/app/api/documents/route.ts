@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { CreateDocumentUploadResponse } from '@/lib/documents/contracts';
+import { FolderValidationError, parseFolderId } from '@/lib/folders/validation';
 import {
   DocumentValidationError,
   DOCUMENT_BUCKET,
@@ -14,6 +15,7 @@ type CreateDocumentBody = {
   name?: unknown;
   mimeType?: unknown;
   sizeBytes?: unknown;
+  folderId?: unknown;
 };
 
 type AuthenticatedContext = NonNullable<Awaited<ReturnType<typeof getAuthenticatedRequestContext>>>;
@@ -43,14 +45,16 @@ export async function POST(request: Request) {
   }
 
   let metadata;
+  let folderId: string | null;
   try {
     metadata = validateDocumentMetadata({
       name: typeof body.name === 'string' ? body.name : '',
       mimeType: typeof body.mimeType === 'string' ? body.mimeType : '',
       sizeBytes: typeof body.sizeBytes === 'number' ? body.sizeBytes : Number.NaN,
     });
+    folderId = parseFolderId(body.folderId, { optional: true });
   } catch (error) {
-    const message = error instanceof DocumentValidationError
+    const message = error instanceof DocumentValidationError || error instanceof FolderValidationError
       ? error.message
       : '파일 정보를 확인해 주세요.';
     return Response.json({ error: message }, { status: 400 });
@@ -59,9 +63,22 @@ export async function POST(request: Request) {
   const documentId = randomUUID();
   const versionId = randomUUID();
   const storagePath = `${context.ownerId}/${documentId}/${versionId}/${storageObjectName(versionId, metadata.sourceType)}`;
+  if (folderId) {
+    const { data: folder, error: folderError } = await context.supabase
+      .from('folders')
+      .select('id')
+      .eq('id', folderId)
+      .eq('owner_id', context.ownerId)
+      .maybeSingle();
+    if (folderError) {
+      return Response.json({ error: '업로드 대상 폴더를 확인하지 못했습니다.' }, { status: 500 });
+    }
+    if (!folder) return Response.json({ error: '업로드 대상 폴더를 찾을 수 없습니다.' }, { status: 404 });
+  }
   const { error: documentError } = await context.supabase.from('documents').insert({
     id: documentId,
     owner_id: context.ownerId,
+    folder_id: folderId,
     title: metadata.title,
     source_type: metadata.sourceType,
   });

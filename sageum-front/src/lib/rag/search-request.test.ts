@@ -13,6 +13,7 @@ test('검색 요청의 기본 topK와 중복 제거된 문서 필터를 반환�
     {
       query: '재택근무 기준',
       documentIds: [DOCUMENT_ID],
+      folderId: null,
       topK: 8,
     },
   );
@@ -32,10 +33,16 @@ test('검색 결과 개수를 1~20으로 제한한다', () => {
   assert.equal(parseSearchRequest({ query: '질문', topK: 4 }).topK, 4);
 });
 
+test('폴더 범위 식별자를 검증한다', () => {
+  assert.equal(parseSearchRequest({ query: '질문', folderId: DOCUMENT_ID }).folderId, DOCUMENT_ID);
+  assert.throws(() => parseSearchRequest({ query: '질문', folderId: 'root' }), /폴더/u);
+});
+
 test('브라우저 벡터 필드 없이 질문 원문만 반환한다', () => {
   assert.deepEqual(parseSearchRequest({ query: ' 질문 ' }), {
     query: '질문',
     documentIds: [],
+    folderId: null,
     topK: 8,
   });
 });

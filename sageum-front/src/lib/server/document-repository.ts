@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { mapStoredDocument } from '@/lib/documents/repository-mapper';
+import type { Folder } from '@/lib/folders/types';
 import type { IndexedDocument } from '@/lib/rag/local-search';
 import type { Database } from '@/lib/supabase/database.types';
 
@@ -52,4 +53,26 @@ export async function listIndexedDocuments(
     if (!version) return [];
     return [mapStoredDocument(document, version, chunksByVersion.get(version.id) ?? [])];
   });
+}
+
+export async function listFolders(
+  supabase: SupabaseClient<Database>,
+  ownerId: string,
+): Promise<Folder[]> {
+  const { data, error } = await supabase
+    .from('folders')
+    .select('*')
+    .eq('owner_id', ownerId)
+    .order('sort_order', { ascending: true })
+    .order('name', { ascending: true });
+
+  if (error) throw new Error('폴더 목록을 불러오지 못했습니다.');
+  return data.map((folder) => ({
+    id: folder.id,
+    parentId: folder.parent_id,
+    name: folder.name,
+    sortOrder: folder.sort_order,
+    createdAt: folder.created_at,
+    updatedAt: folder.updated_at,
+  }));
 }

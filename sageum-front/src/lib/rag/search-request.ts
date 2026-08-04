@@ -6,6 +6,7 @@ const MAX_TOP_K = 20;
 export type SearchRequest = {
   query: string;
   documentIds: string[];
+  folderId: string | null;
   topK: number;
 };
 
@@ -40,10 +41,17 @@ export function parseSearchRequest(input: unknown): SearchRequest {
     throw new SearchRequestError('올바르지 않은 문서 식별자가 포함되어 있습니다.');
   }
 
+  const folderId = body.folderId === undefined || body.folderId === null || body.folderId === ''
+    ? null
+    : body.folderId;
+  if (folderId !== null && (typeof folderId !== 'string' || !UUID_PATTERN.test(folderId))) {
+    throw new SearchRequestError('올바르지 않은 폴더 식별자가 포함되어 있습니다.');
+  }
+
   const topK = body.topK === undefined ? 8 : body.topK;
   if (!Number.isInteger(topK) || typeof topK !== 'number' || topK < 1 || topK > MAX_TOP_K) {
     throw new SearchRequestError(`검색 결과 개수는 1~${MAX_TOP_K} 사이여야 합니다.`);
   }
 
-  return { query, documentIds, topK };
+  return { query, documentIds, folderId, topK };
 }

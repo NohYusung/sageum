@@ -3,6 +3,7 @@
 import {
   Bot,
   CheckCircle2,
+  ChevronDown,
   ChevronRight,
   Cloud,
   Database,
@@ -10,13 +11,18 @@ import {
   FileCode2,
   FileSpreadsheet,
   FileText,
+  Folder,
+  FolderInput,
   FolderOpen,
+  FolderPlus,
+  Home,
   HardDriveUpload,
   Library,
   LoaderCircle,
   LogOut,
   MessageSquareText,
   Paperclip,
+  Pencil,
   Search,
   Send,
   ShieldCheck,
@@ -27,6 +33,7 @@ import {
 } from 'lucide-react';
 import {
   type FormEvent,
+  type DragEvent,
   type KeyboardEvent,
   useEffect,
   useMemo,
@@ -36,6 +43,20 @@ import {
 import { logoutAction } from '@/app/actions';
 import { deleteStoredDocument } from '@/lib/documents/browser-delete';
 import { uploadAndProcessDocument } from '@/lib/documents/browser-upload';
+import {
+  createFolder,
+  deleteFolder,
+  moveDocumentToFolder,
+  moveFolder,
+  renameFolder,
+} from '@/lib/folders/browser';
+import {
+  canMoveFolder,
+  documentsInFolderScope,
+  flattenFolderTree,
+  folderPath,
+} from '@/lib/folders/tree';
+import type { Folder as RepositoryFolder } from '@/lib/folders/types';
 import type {
   ApiErrorResponse,
   SearchDocumentsResponse,
@@ -99,6 +120,8 @@ const INITIAL_MESSAGES: ChatMessage[] = [
 ];
 
 const DOCUMENT_PREVIEW_FRAME_NAME = 'sageum-document-preview';
+const DOCUMENT_DRAG_TYPE = 'application/x-sageum-document';
+const FOLDER_DRAG_TYPE = 'application/x-sageum-folder';
 
 function SageumMark() {
   return (
@@ -142,12 +165,14 @@ function sourceLocation(source: SourceReference) {
 async function searchRepository(
   documents: IndexedDocument[],
   query: string,
+  folderId: string | null,
 ) {
   const response = await fetch('/api/search', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       query,
+      folderId,
       topK: 8,
     }),
   });
@@ -192,15 +217,23 @@ function documentPreviewUrl(documentId: string, chunk?: DocumentChunk) {
 export function DocumentRagApp({
   userEmail,
   initialDocuments,
+  initialFolders,
 }: {
   userEmail: string;
   initialDocuments: IndexedDocument[];
+  initialFolders: RepositoryFolder[];
 }) {
   const [view, setView] = useState<View>('chat');
   const [documents, setDocuments] = useState<IndexedDocument[]>(() => initialDocuments);
+  const [folders, setFolders] = useState<RepositoryFolder[]>(() => initialFolders);
   const [messages, setMessages] = useState<ChatMessage[]>(INITIAL_MESSAGES);
   const [query, setQuery] = useState('');
   const [documentFilter, setDocumentFilter] = useState('');
+  const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
+  const [searchFolderId, setSearchFolderId] = useState('');
+  const [folderBusy, setFolderBusy] = useState(false);
+  const [folderActionError, setFolderActionError] = useState<string | null>(null);
+  const [dragOverFolderId, setDragOverFolderId] = useState<string | null | 'root'>(null);
   const [selectedDocumentId, setSelectedDocumentId] = useState(
     () => initialDocuments[0]?.document.id ?? '',
   );
@@ -230,9 +263,21 @@ export function DocumentRagApp({
     if (conversation) conversation.scrollTop = conversation.scrollHeight;
   }, [messages]);
 
-  const selectedDocument = useMemo(
-    () => documents.find(({ document }) => document.id === selectedDocumentId) ?? documents[0],
-    [documents, selectedDocumentId],
+  const folderTree = useMemo(() => flattenFolderTree(folders), [folders]);
+  const selectedFolder = useMemo(
+    () => folders.find((folder) => folder.id === selectedFolderId) ?? null,
+    [folders, selectedFolderId],
+  );
+  const selectedFolderPath = useMemo(
+    () => folderPath(folders, selectedFolderId),
+    [folders, selectedFolderId],
+  );
+  const childFolders = useMemo(
+    () => folders
+      .filter((folder) => folder.parentId === selectedFolderId)
+      .toSorted((left, right) => left.sortOrder - right.sortOrder
+        || left.name.localeCompare(right.name, 'ko-KR', { numeric: true, sensitivity: 'base' })),
+    [folders, selectedFolderId],
   );
   const totalChunks = useMemo(
     () => documents.reduce((sum, document) => sum + document.chunks.length, 0),
@@ -240,21 +285,27 @@ export function DocumentRagApp({
   );
   const filteredDocuments = useMemo(() => {
     const term = documentFilter.trim().toLocaleLowerCase('ko-KR');
-    if (!term) return documents;
-    return documents.filter(({ document }) =>
+    const currentDocuments = documentsInFolderScope(documents, folders, selectedFolderId);
+    if (!term) return currentDocuments;
+    return currentDocuments.filter(({ document }) =>
       `${document.title} ${document.name}`.toLocaleLowerCase('ko-KR').includes(term),
     );
-  }, [documentFilter, documents]);
+  }, [documentFilter, documents, folders, selectedFolderId]);
+  const selectedDocument = useMemo(
+    () => filteredDocuments.find(({ document }) => document.id === selectedDocumentId)
+      ?? filteredDocuments[0],
+    [filteredDocuments, selectedDocumentId],
+  );
   const SelectedDocumentIcon = selectedDocument ? fileIcon(selectedDocument.document.sourceType) : FileText;
 
-  async function handleFiles(fileList: FileList | File[]) {
+  async function handleFiles(fileList: FileList | File[], folderId = selectedFolderId) {
     const files = Array.from(fileList);
     if (!files.length) return;
     setUploadBusy(true);
     setUploadMessage(null);
 
     const results = await Promise.allSettled(
-      files.map((file) => uploadAndProcessDocument(file)),
+      files.map((file) => uploadAndProcessDocument(file, folderId)),
     );
 
     const succeeded = results.flatMap((result) => (result.status === 'fulfilled' ? [result.value] : []));
@@ -271,6 +322,7 @@ export function DocumentRagApp({
         ...current.filter(({ document }) => !uploadedIds.has(document.id)),
       ]);
       setSelectedDocumentId(succeeded[0].document.id);
+      setSelectedFolderId(folderId);
       setUploadMessage(
         system?.mode === 'cloud'
           ? `${succeeded.length}개 문서를 Supabase에 저장하고 Qdrant에 색인했습니다.`
@@ -282,6 +334,122 @@ export function DocumentRagApp({
       setUploadMessage(`실패: ${failures.join(' ')}`);
     }
     setUploadBusy(false);
+  }
+
+  function selectFolder(folderId: string | null) {
+    setSelectedFolderId(folderId);
+    setDocumentFilter('');
+    const nextDocument = documents.find(({ document }) => document.folderId === folderId);
+    setSelectedDocumentId(nextDocument?.document.id ?? '');
+    setFolderActionError(null);
+  }
+
+  async function handleCreateFolder() {
+    if (folderBusy) return;
+    const name = window.prompt(
+      selectedFolder ? `“${selectedFolder.name}” 안에 만들 폴더 이름` : '새 폴더 이름',
+    );
+    if (!name?.trim()) return;
+    setFolderBusy(true);
+    setFolderActionError(null);
+    try {
+      const created = await createFolder(name, selectedFolderId);
+      setFolders((current) => [...current, created]);
+    } catch (error) {
+      setFolderActionError(error instanceof Error ? error.message : '폴더를 만들지 못했습니다.');
+    } finally {
+      setFolderBusy(false);
+    }
+  }
+
+  async function handleRenameSelectedFolder() {
+    if (!selectedFolder || folderBusy) return;
+    const name = window.prompt('변경할 폴더 이름', selectedFolder.name);
+    if (!name?.trim() || name.trim() === selectedFolder.name) return;
+    setFolderBusy(true);
+    setFolderActionError(null);
+    try {
+      const renamed = await renameFolder(selectedFolder.id, name);
+      setFolders((current) => current.map((folder) => folder.id === renamed.id ? renamed : folder));
+    } catch (error) {
+      setFolderActionError(error instanceof Error ? error.message : '폴더 이름을 변경하지 못했습니다.');
+    } finally {
+      setFolderBusy(false);
+    }
+  }
+
+  async function handleDeleteSelectedFolder() {
+    if (!selectedFolder || folderBusy) return;
+    if (!window.confirm(`비어 있는 “${selectedFolder.name}” 폴더를 삭제할까요?`)) return;
+    setFolderBusy(true);
+    setFolderActionError(null);
+    try {
+      await deleteFolder(selectedFolder.id);
+      const parentId = selectedFolder.parentId;
+      setFolders((current) => current.filter((folder) => folder.id !== selectedFolder.id));
+      selectFolder(parentId);
+      if (searchFolderId === selectedFolder.id) setSearchFolderId('');
+    } catch (error) {
+      setFolderActionError(error instanceof Error ? error.message : '폴더를 삭제하지 못했습니다.');
+    } finally {
+      setFolderBusy(false);
+    }
+  }
+
+  async function handleMoveDocument(documentId: string, folderId: string | null) {
+    const previous = documents.find(({ document }) => document.id === documentId)?.document.folderId ?? null;
+    if (previous === folderId) return;
+    setFolderActionError(null);
+    setDocuments((current) => current.map((item) => item.document.id === documentId
+      ? { ...item, document: { ...item.document, folderId } }
+      : item));
+    try {
+      await moveDocumentToFolder(documentId, folderId);
+    } catch (error) {
+      setDocuments((current) => current.map((item) => item.document.id === documentId
+        ? { ...item, document: { ...item.document, folderId: previous } }
+        : item));
+      setFolderActionError(error instanceof Error ? error.message : '문서를 이동하지 못했습니다.');
+    }
+  }
+
+  async function handleMoveFolder(folderId: string, parentId: string | null) {
+    const existing = folders.find((folder) => folder.id === folderId);
+    if (!existing || existing.parentId === parentId) return;
+    if (!canMoveFolder(folders, folderId, parentId)) {
+      setFolderActionError('폴더를 자기 자신이나 하위 폴더로 이동할 수 없습니다.');
+      return;
+    }
+    setFolderActionError(null);
+    setFolders((current) => current.map((folder) => folder.id === folderId
+      ? { ...folder, parentId }
+      : folder));
+    try {
+      const moved = await moveFolder(folderId, parentId);
+      setFolders((current) => current.map((folder) => folder.id === moved.id ? moved : folder));
+    } catch (error) {
+      setFolders((current) => current.map((folder) => folder.id === folderId ? existing : folder));
+      setFolderActionError(error instanceof Error ? error.message : '폴더를 이동하지 못했습니다.');
+    }
+  }
+
+  function handleFolderDrop(event: DragEvent<HTMLElement>, folderId: string | null) {
+    event.preventDefault();
+    event.stopPropagation();
+    setDragOverFolderId(null);
+
+    if (event.dataTransfer.files.length) {
+      setSelectedFolderId(folderId);
+      void handleFiles(event.dataTransfer.files, folderId);
+      return;
+    }
+    const documentId = event.dataTransfer.getData(DOCUMENT_DRAG_TYPE);
+    if (documentId) {
+      void handleMoveDocument(documentId, folderId);
+      return;
+    }
+    const draggedFolderId = event.dataTransfer.getData(FOLDER_DRAG_TYPE);
+    if (draggedFolderId) void handleMoveFolder(draggedFolderId, folderId);
   }
 
   async function handleDeleteDocument(item: IndexedDocument) {
@@ -340,7 +508,10 @@ export function DocumentRagApp({
     ]);
 
     try {
-      const result = await searchRepository(documents, question);
+      const scopedDocuments = searchFolderId
+        ? documentsInFolderScope(documents, folders, searchFolderId, { recursive: true })
+        : documents;
+      const result = await searchRepository(scopedDocuments, question, searchFolderId || null);
       setMessages((current) => [
         ...current,
         {
@@ -380,6 +551,8 @@ export function DocumentRagApp({
 
   function openSource(source: SourceReference) {
     setSelectedDocumentId(source.documentId);
+    const sourceDocument = documents.find(({ document }) => document.id === source.documentId);
+    setSelectedFolderId(sourceDocument?.document.folderId ?? null);
     setView('documents');
   }
 
@@ -497,6 +670,24 @@ export function DocumentRagApp({
             </div>
 
             <div className="composer-wrap">
+              <label className="chat-search-scope">
+                <FolderInput size={14} />
+                <span>검색 범위</span>
+                <select
+                  aria-label="질문 검색 폴더"
+                  value={searchFolderId}
+                  onChange={(event) => setSearchFolderId(event.target.value)}
+                  disabled={searchBusy}
+                >
+                  <option value="">전체 저장소</option>
+                  {folderTree.map((folder) => (
+                    <option key={folder.id} value={folder.id}>
+                      {`${'　'.repeat(folder.depth)}${folder.name}`}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown size={13} />
+              </label>
               <form className="composer" onSubmit={handleQuestion}>
                 <button type="button" aria-label="문서 첨부" onClick={() => setView('upload')}>
                   <Paperclip size={19} />
@@ -537,7 +728,18 @@ export function DocumentRagApp({
             </header>
 
             <div className="document-toolbar">
-              <label>
+              <nav className="folder-breadcrumb" aria-label="현재 폴더 경로">
+                <button type="button" onClick={() => selectFolder(null)}>
+                  <Home size={14} /> 내 문서
+                </button>
+                {selectedFolderPath.map((folder) => (
+                  <span key={folder.id}>
+                    <ChevronRight size={12} />
+                    <button type="button" onClick={() => selectFolder(folder.id)}>{folder.name}</button>
+                  </span>
+                ))}
+              </nav>
+              <label className="document-search">
                 <Search size={17} />
                 <input
                   aria-label="문서명 검색"
@@ -546,48 +748,169 @@ export function DocumentRagApp({
                   onChange={(event) => setDocumentFilter(event.target.value)}
                 />
               </label>
-              <span>{documents.length} documents · {totalChunks} chunks</span>
+              <span>{filteredDocuments.length} documents · {totalChunks} chunks</span>
             </div>
 
             <div className="document-layout">
-              <div className="document-list">
-                {filteredDocuments.map((item) => {
-                  const Icon = fileIcon(item.document.sourceType);
-                  return (
+              <aside className="folder-navigation">
+                <div className="folder-navigation-heading">
+                  <span>FOLDERS</span>
+                  <button type="button" onClick={() => void handleCreateFolder()} disabled={folderBusy} title="새 폴더">
+                    {folderBusy ? <LoaderCircle size={15} className="spin" /> : <FolderPlus size={15} />}
+                  </button>
+                </div>
+                <button
+                  className={`folder-tree-root ${selectedFolderId === null ? 'selected' : ''} ${dragOverFolderId === 'root' ? 'drop-target' : ''}`}
+                  type="button"
+                  onClick={() => selectFolder(null)}
+                  onDragOver={(event) => {
+                    event.preventDefault();
+                    setDragOverFolderId('root');
+                  }}
+                  onDrop={(event) => handleFolderDrop(event, null)}
+                >
+                  <Home size={16} />
+                  내 문서
+                  <small>{documents.filter(({ document }) => !document.folderId).length}</small>
+                </button>
+                <div className="folder-tree">
+                  {folderTree.map((folder) => (
                     <button
-                      className={selectedDocument?.document.id === item.document.id ? 'selected' : ''}
-                      key={item.document.id}
+                      className={`${selectedFolderId === folder.id ? 'selected' : ''} ${dragOverFolderId === folder.id ? 'drop-target' : ''}`}
+                      draggable
+                      key={folder.id}
                       type="button"
-                      onClick={() => setSelectedDocumentId(item.document.id)}
+                      style={{ paddingLeft: `${12 + folder.depth * 16}px` }}
+                      onClick={() => selectFolder(folder.id)}
+                      onDragStart={(event) => {
+                        event.dataTransfer.effectAllowed = 'move';
+                        event.dataTransfer.setData(FOLDER_DRAG_TYPE, folder.id);
+                      }}
+                      onDragEnd={() => setDragOverFolderId(null)}
+                      onDragOver={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        setDragOverFolderId(folder.id);
+                      }}
+                      onDrop={(event) => handleFolderDrop(event, folder.id)}
                     >
-                      <span className={`file-icon ${item.document.sourceType}`}><Icon size={20} /></span>
-                      <span className="document-name">
-                        <strong>{item.document.title}</strong>
-                        <small>{item.document.name}</small>
-                      </span>
-                      <span className="document-meta">
-                        <strong>{item.chunks.length} chunks</strong>
-                        <small>
-                          {item.status === 'deleting' ? '삭제 재시도 필요' : formatBytes(item.document.sizeBytes)}
-                        </small>
-                      </span>
-                      {item.status === 'ready' ? (
-                        <CheckCircle2 size={17} className="ready-icon" />
-                      ) : item.status === 'failed' ? (
-                        <XCircle size={17} className="failed-icon" />
-                      ) : (
-                        <LoaderCircle size={17} className="processing-icon spin" />
-                      )}
+                      <Folder size={15} />
+                      <span>{folder.name}</span>
+                      <small>{documents.filter(({ document }) => document.folderId === folder.id).length}</small>
                     </button>
-                  );
-                })}
-                {!filteredDocuments.length ? (
-                  <div className="document-list-empty">
-                    <Search size={22} />
-                    <strong>일치하는 문서가 없습니다</strong>
-                    <span>다른 문서명으로 검색해 보세요.</span>
+                  ))}
+                </div>
+                <p>파일과 폴더를 원하는 위치로 드래그하세요.</p>
+              </aside>
+
+              <div className="repository-browser">
+                <div className="repository-browser-heading">
+                  <div>
+                    <span className="eyebrow">CURRENT FOLDER</span>
+                    <h2>{selectedFolder?.name ?? '내 문서'}</h2>
+                  </div>
+                  <div className="folder-actions">
+                    <button type="button" onClick={() => void handleCreateFolder()} disabled={folderBusy}>
+                      <FolderPlus size={14} /> 새 폴더
+                    </button>
+                    {selectedFolder ? (
+                      <>
+                        <button type="button" onClick={() => void handleRenameSelectedFolder()} disabled={folderBusy}>
+                          <Pencil size={13} /> 이름 변경
+                        </button>
+                        <button className="danger" type="button" onClick={() => void handleDeleteSelectedFolder()} disabled={folderBusy}>
+                          <Trash2 size={13} /> 삭제
+                        </button>
+                      </>
+                    ) : null}
+                  </div>
+                </div>
+
+                {folderActionError ? <p className="folder-action-error" role="alert">{folderActionError}</p> : null}
+
+                {childFolders.length ? (
+                  <div className="folder-grid">
+                    {childFolders.map((folder) => (
+                      <button
+                        className={dragOverFolderId === folder.id ? 'drop-target' : ''}
+                        draggable
+                        key={folder.id}
+                        type="button"
+                        onClick={() => selectFolder(folder.id)}
+                        onDragStart={(event) => {
+                          event.dataTransfer.effectAllowed = 'move';
+                          event.dataTransfer.setData(FOLDER_DRAG_TYPE, folder.id);
+                        }}
+                        onDragEnd={() => setDragOverFolderId(null)}
+                        onDragOver={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          setDragOverFolderId(folder.id);
+                        }}
+                        onDrop={(event) => handleFolderDrop(event, folder.id)}
+                      >
+                        <span><Folder size={20} /></span>
+                        <strong>{folder.name}</strong>
+                        <small>{documents.filter(({ document }) => document.folderId === folder.id).length}개 문서</small>
+                        <ChevronRight size={15} />
+                      </button>
+                    ))}
                   </div>
                 ) : null}
+
+                <div
+                  className={`document-list ${dragOverFolderId === (selectedFolderId ?? 'root') ? 'drop-target' : ''}`}
+                  onDragOver={(event) => {
+                    if (!event.dataTransfer.types.includes('Files')) return;
+                    event.preventDefault();
+                    setDragOverFolderId(selectedFolderId ?? 'root');
+                  }}
+                  onDrop={(event) => handleFolderDrop(event, selectedFolderId)}
+                >
+                  {filteredDocuments.map((item) => {
+                    const Icon = fileIcon(item.document.sourceType);
+                    return (
+                      <button
+                        className={selectedDocument?.document.id === item.document.id ? 'selected' : ''}
+                        draggable
+                        key={item.document.id}
+                        type="button"
+                        onClick={() => setSelectedDocumentId(item.document.id)}
+                        onDragStart={(event) => {
+                          event.dataTransfer.effectAllowed = 'move';
+                          event.dataTransfer.setData(DOCUMENT_DRAG_TYPE, item.document.id);
+                        }}
+                        onDragEnd={() => setDragOverFolderId(null)}
+                      >
+                        <span className={`file-icon ${item.document.sourceType}`}><Icon size={20} /></span>
+                        <span className="document-name">
+                          <strong>{item.document.title}</strong>
+                          <small>{item.document.name}</small>
+                        </span>
+                        <span className="document-meta">
+                          <strong>{item.chunks.length} chunks</strong>
+                          <small>
+                            {item.status === 'deleting' ? '삭제 재시도 필요' : formatBytes(item.document.sizeBytes)}
+                          </small>
+                        </span>
+                        {item.status === 'ready' ? (
+                          <CheckCircle2 size={17} className="ready-icon" />
+                        ) : item.status === 'failed' ? (
+                          <XCircle size={17} className="failed-icon" />
+                        ) : (
+                          <LoaderCircle size={17} className="processing-icon spin" />
+                        )}
+                      </button>
+                    );
+                  })}
+                  {!filteredDocuments.length ? (
+                    <div className="document-list-empty">
+                      <FolderOpen size={24} />
+                      <strong>{documentFilter ? '일치하는 문서가 없습니다' : '이 폴더가 비어 있습니다'}</strong>
+                      <span>파일을 이 영역이나 왼쪽 폴더로 드래그해 업로드할 수 있습니다.</span>
+                    </div>
+                  ) : null}
+                </div>
               </div>
 
               {selectedDocument ? (
@@ -604,6 +927,25 @@ export function DocumentRagApp({
                     <div><dt>청크</dt><dd>{selectedDocument.chunks.length}</dd></div>
                     <div><dt>인덱싱</dt><dd>{formatDate(selectedDocument.indexedAt)}</dd></div>
                   </dl>
+                  <label className="document-folder-select">
+                    <span><FolderInput size={14} /> 저장 위치</span>
+                    <select
+                      aria-label="문서 이동 폴더"
+                      value={selectedDocument.document.folderId ?? ''}
+                      onChange={(event) => void handleMoveDocument(
+                        selectedDocument.document.id,
+                        event.target.value || null,
+                      )}
+                    >
+                      <option value="">내 문서</option>
+                      {folderTree.map((folder) => (
+                        <option key={folder.id} value={folder.id}>
+                          {`${'　'.repeat(folder.depth)}${folder.name}`}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown size={13} />
+                  </label>
                   {documentActionError?.documentId === selectedDocument.document.id ? (
                     <p className="document-action-error" role="alert">
                       {documentActionError.message}
@@ -705,6 +1047,22 @@ export function DocumentRagApp({
             </header>
 
             <div className="upload-content">
+              <label className="upload-folder-select">
+                <span><FolderInput size={16} /> 저장할 폴더</span>
+                <select
+                  value={selectedFolderId ?? ''}
+                  onChange={(event) => setSelectedFolderId(event.target.value || null)}
+                  disabled={uploadBusy}
+                >
+                  <option value="">내 문서</option>
+                  {folderTree.map((folder) => (
+                    <option key={folder.id} value={folder.id}>
+                      {`${'　'.repeat(folder.depth)}${folder.name}`}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown size={14} />
+              </label>
               <div
                 className="dropzone"
                 onDragOver={(event) => event.preventDefault()}

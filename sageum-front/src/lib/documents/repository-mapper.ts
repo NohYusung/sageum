@@ -53,6 +53,8 @@ export function mapStoredDocument(
       mimeType: version.mime_type,
       sourceType: sourceType(document.source_type),
       sizeBytes: version.size_bytes,
+      folderId: document.folder_id,
+      sortOrder: document.sort_order,
       blocks: [],
     },
     chunks: chunks.map((chunk) => {

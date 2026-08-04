@@ -1,4 +1,5 @@
 import type { SearchDocumentsResponse } from '@/lib/documents/contracts';
+import { descendantFolderIds } from '@/lib/folders/tree';
 import { composeExtractiveAnswer, type SourceReference } from '@/lib/rag/local-search';
 import { parseSearchRequest, SearchRequestError } from '@/lib/rag/search-request';
 import { getAuthenticatedRequestContext } from '@/lib/server/api-auth';
@@ -53,9 +54,53 @@ export async function POST(request: Request) {
   try {
     const vectorStore = getQdrantVectorStore();
     await vectorStore.ensureCollection(configuration.embedding.dimensions);
+    let documentIds = search.documentIds;
+    if (search.folderId) {
+      const [foldersResult, documentsResult] = await Promise.all([
+        context.supabase
+          .from('folders')
+          .select('id,parent_id,name,sort_order,created_at,updated_at')
+          .eq('owner_id', context.ownerId),
+        context.supabase
+          .from('documents')
+          .select('id,folder_id')
+          .eq('owner_id', context.ownerId)
+          .eq('deletion_status', 'active'),
+      ]);
+      if (foldersResult.error || documentsResult.error) {
+        throw new Error('폴더 검색 범위를 확인하지 못했습니다.');
+      }
+      const folders = foldersResult.data.map((folder) => ({
+        id: folder.id,
+        parentId: folder.parent_id,
+        name: folder.name,
+        sortOrder: folder.sort_order,
+        createdAt: folder.created_at,
+        updatedAt: folder.updated_at,
+      }));
+      if (!folders.some((folder) => folder.id === search.folderId)) {
+        return Response.json({ error: '검색할 폴더를 찾을 수 없습니다.' }, { status: 404 });
+      }
+      const folderIds = descendantFolderIds(folders, search.folderId);
+      const scopedDocumentIds = documentsResult.data
+        .filter((document) => document.folder_id && folderIds.has(document.folder_id))
+        .map((document) => document.id);
+      documentIds = documentIds.length
+        ? documentIds.filter((documentId) => scopedDocumentIds.includes(documentId))
+        : scopedDocumentIds;
+
+      if (!documentIds.length) {
+        return Response.json({
+          answer: composeExtractiveAnswer([]),
+          sources: [],
+          mode: 'qdrant',
+          answerMode: 'extractive-fallback',
+        } satisfies SearchDocumentsResponse);
+      }
+    }
     const results = await vectorStore.query(search.query, context.ownerId, {
       limit: Math.min(search.topK * 2, 40),
-      documentIds: search.documentIds,
+      documentIds,
       scoreThreshold: scoreThreshold(),
       embeddingModel: configuration.embedding.model,
     });

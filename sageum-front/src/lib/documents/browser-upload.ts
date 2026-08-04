@@ -31,6 +31,7 @@ async function markMissingUploadAsFailed(documentId: string, versionId: string) 
 
 export async function uploadAndProcessDocument(
   file: File,
+  folderId: string | null = null,
 ): Promise<IndexedDocument> {
   const createResponse = await fetch('/api/documents', {
     method: 'POST',
@@ -39,6 +40,7 @@ export async function uploadAndProcessDocument(
       name: file.name,
       mimeType: file.type,
       sizeBytes: file.size,
+      folderId,
     }),
   });
   const { upload } = await responseJson<CreateDocumentUploadResponse>(createResponse);

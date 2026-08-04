@@ -785,6 +785,39 @@ svg {
   background: linear-gradient(to bottom, rgb(251 251 248 / 80%), var(--paper) 30%);
 }
 
+.chat-search-scope {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: fit-content;
+  max-width: 740px;
+  margin: 0 auto 8px;
+  padding: 5px 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.chat-search-scope select,
+.upload-folder-select select {
+  appearance: none;
+  min-width: 0;
+  padding: 0 18px 0 0;
+  border: 0;
+  background: transparent;
+  color: var(--sage-dark);
+  font-weight: 700;
+}
+
+.chat-search-scope > svg:last-child,
+.upload-folder-select > svg:last-child {
+  margin-left: -20px;
+  pointer-events: none;
+}
+
 .composer {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
@@ -1065,16 +1098,16 @@ svg {
 }
 
 .document-toolbar {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(220px, 320px) auto;
   align-items: center;
-  justify-content: space-between;
   gap: 20px;
   padding: 18px clamp(24px, 4vw, 50px);
   border-bottom: 1px solid var(--line);
   background: var(--paper);
 }
 
-.document-toolbar label {
+.document-toolbar .document-search {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1086,7 +1119,7 @@ svg {
   color: var(--faint);
 }
 
-.document-toolbar label:focus-within {
+.document-toolbar .document-search:focus-within {
   border-color: #9bb1a5;
 }
 
@@ -1104,15 +1137,303 @@ svg {
   white-space: nowrap;
 }
 
+.folder-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.folder-breadcrumb > button,
+.folder-breadcrumb span,
+.folder-breadcrumb span button {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+}
+
+.folder-breadcrumb > button,
+.folder-breadcrumb span button {
+  gap: 5px;
+  max-width: 180px;
+  padding: 4px 5px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ink-soft);
+  font-size: 10px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.folder-breadcrumb button:hover {
+  background: var(--sage-pale);
+  color: var(--sage-dark);
+}
+
+.folder-breadcrumb span {
+  gap: 2px;
+  color: var(--faint);
+}
+
 .document-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(400px, 43%);
+  grid-template-columns: 210px minmax(320px, 1fr) minmax(400px, 41%);
   min-height: calc(100dvh - 150px);
 }
 
-.document-list {
-  padding: 19px clamp(22px, 3vw, 40px) 40px;
+.folder-navigation {
+  position: sticky;
+  top: 91px;
+  align-self: start;
+  height: calc(100dvh - 91px);
+  padding: 20px 12px;
+  overflow-y: auto;
   border-right: 1px solid var(--line);
+  background: #f5f5f0;
+}
+
+.folder-navigation-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 7px 10px;
+}
+
+.folder-navigation-heading > span {
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: .12em;
+}
+
+.folder-navigation-heading button,
+.folder-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 29px;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--ink-soft);
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.folder-navigation-heading button {
+  width: 29px;
+  padding: 0;
+}
+
+.folder-navigation-heading button:hover,
+.folder-actions button:hover {
+  border-color: #b6c7bd;
+  background: var(--sage-pale);
+  color: var(--sage-dark);
+}
+
+.folder-tree-root,
+.folder-tree > button {
+  display: grid;
+  grid-template-columns: 17px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  min-height: 35px;
+  margin-bottom: 3px;
+  padding: 7px 9px;
+  overflow: hidden;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--ink-soft);
+  font-size: 10px;
+  text-align: left;
+}
+
+.folder-tree-root > span,
+.folder-tree > button > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.folder-tree-root small,
+.folder-tree > button small {
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: 8px;
+}
+
+.folder-tree-root:hover,
+.folder-tree > button:hover,
+.folder-tree-root.selected,
+.folder-tree > button.selected {
+  background: var(--sage-pale);
+  color: var(--sage-dark);
+}
+
+.folder-tree-root.selected,
+.folder-tree > button.selected {
+  border-color: #ccdcd2;
+  font-weight: 750;
+}
+
+.folder-navigation > p {
+  margin: 17px 7px 0;
+  color: var(--faint);
+  font-size: 8px;
+  line-height: 1.55;
+}
+
+.repository-browser {
+  min-width: 0;
+  padding-bottom: 40px;
+  border-right: 1px solid var(--line);
+}
+
+.repository-browser-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 22px clamp(20px, 2.5vw, 32px) 12px;
+}
+
+.repository-browser-heading h2 {
+  margin: 4px 0 0;
+  overflow: hidden;
+  font-family: var(--display);
+  font-size: 21px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.folder-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 5px;
+}
+
+.folder-actions button.danger {
+  color: var(--danger);
+}
+
+.folder-actions button.danger:hover {
+  border-color: #e3b5af;
+  background: var(--danger-soft);
+}
+
+.folder-action-error {
+  margin: 0 clamp(20px, 2.5vw, 32px) 12px;
+  padding: 9px 11px;
+  border: 1px solid #eccdc8;
+  border-radius: 7px;
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 9px;
+}
+
+.folder-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(155px, 1fr));
+  gap: 8px;
+  padding: 0 clamp(20px, 2.5vw, 32px) 14px;
+}
+
+.folder-grid > button {
+  display: grid;
+  grid-template-columns: 35px minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
+  align-items: center;
+  gap: 1px 9px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--surface);
+  box-shadow: var(--shadow-small);
+  text-align: left;
+}
+
+.folder-grid > button > span {
+  display: grid;
+  grid-row: 1 / 3;
+  width: 35px;
+  height: 35px;
+  place-items: center;
+  border-radius: 8px;
+  background: var(--sage-soft);
+  color: var(--sage);
+}
+
+.folder-grid strong,
+.folder-grid small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.folder-grid strong {
+  font-family: var(--display);
+  font-size: 12px;
+}
+
+.folder-grid small {
+  color: var(--faint);
+  font-size: 8px;
+}
+
+.folder-grid > button > svg {
+  grid-column: 3;
+  grid-row: 1 / 3;
+  color: var(--faint);
+}
+
+.folder-grid > button:hover {
+  border-color: #b6c7bd;
+  background: var(--sage-pale);
+}
+
+.folder-tree > button[draggable='true'],
+.folder-grid > button[draggable='true'],
+.document-list > button[draggable='true'] {
+  cursor: grab;
+}
+
+.folder-tree > button[draggable='true']:active,
+.folder-grid > button[draggable='true']:active,
+.document-list > button[draggable='true']:active {
+  cursor: grabbing;
+}
+
+.drop-target,
+.folder-tree-root.drop-target,
+.folder-tree > button.drop-target,
+.folder-grid > button.drop-target,
+.document-list.drop-target {
+  border-color: var(--sage) !important;
+  background: var(--sage-soft) !important;
+  box-shadow: inset 0 0 0 2px rgb(73 107 91 / 12%);
+}
+
+.document-list {
+  min-height: 210px;
+  margin: 0 clamp(20px, 2.5vw, 32px);
+  padding: 2px 0 24px;
+  border: 1px solid transparent;
+  border-radius: 10px;
 }
 
 .document-list > button {
@@ -1314,6 +1635,44 @@ svg {
   font-family: var(--mono);
   font-size: 10px;
   font-weight: 700;
+}
+
+.document-folder-select {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) 14px;
+  align-items: center;
+  gap: 8px;
+  margin: -12px 0 22px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.document-folder-select > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 700;
+}
+
+.document-folder-select select {
+  appearance: none;
+  min-width: 0;
+  padding-right: 18px;
+  border: 0;
+  background: transparent;
+  color: var(--sage-dark);
+  font-size: 9px;
+  font-weight: 700;
+  text-align: right;
+}
+
+.document-folder-select > svg:last-child {
+  margin-left: -18px;
+  pointer-events: none;
 }
 
 .document-preview-sticky {
@@ -1563,6 +1922,32 @@ svg {
   padding: 38px 0 60px;
 }
 
+.upload-folder-select {
+  display: grid;
+  grid-template-columns: auto minmax(160px, 1fr) 16px;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--surface);
+  color: var(--ink-soft);
+}
+
+.upload-folder-select > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.upload-folder-select select {
+  width: 100%;
+  text-align: right;
+}
+
 .dropzone {
   display: grid;
   min-height: 275px;
@@ -1763,6 +2148,22 @@ svg {
   .composer-wrap {
     padding-inline: 24px;
   }
+
+  .document-layout {
+    grid-template-columns: 200px minmax(0, 1fr);
+  }
+
+  .document-inspector {
+    grid-column: 1 / -1;
+    position: static;
+    height: auto;
+    overflow: visible;
+    border-top: 1px solid var(--line);
+  }
+
+  .document-preview-sticky {
+    position: static;
+  }
 }
 
 @media (max-width: 980px) {
@@ -1794,6 +2195,18 @@ svg {
 
   .document-layout {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .folder-navigation {
+    position: static;
+    height: auto;
+    max-height: 310px;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .repository-browser {
+    border-right: 0;
   }
 
   .document-list {
@@ -1927,7 +2340,12 @@ svg {
   }
 
   .document-toolbar {
+    grid-template-columns: minmax(0, 1fr) minmax(200px, 280px);
     padding-inline: 18px;
+  }
+
+  .document-toolbar > span {
+    display: none;
   }
 
   .document-list {
@@ -1993,12 +2411,21 @@ svg {
 
   .document-toolbar {
     align-items: stretch;
-    flex-direction: column;
+    grid-template-columns: minmax(0, 1fr);
     gap: 8px;
   }
 
-  .document-toolbar label {
+  .document-toolbar .document-search {
     width: 100%;
+  }
+
+  .repository-browser-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .folder-actions {
+    justify-content: flex-start;
   }
 
   .document-list > button {

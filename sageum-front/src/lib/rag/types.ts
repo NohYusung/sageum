@@ -19,6 +19,8 @@ export type NormalizedBlock = {
 export type NormalizedDocument = {
   id: string;
   versionId: string;
+  folderId?: string | null;
+  sortOrder?: number;
   name: string;
   title: string;
   mimeType: string;

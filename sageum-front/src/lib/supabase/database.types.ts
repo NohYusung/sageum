@@ -178,9 +178,11 @@ export type Database = {
         Row: {
           created_at: string;
           deletion_status: string;
+          folder_id: string | null;
           id: string;
           latest_version_id: string | null;
           owner_id: string;
+          sort_order: number;
           source_type: string;
           title: string;
           updated_at: string;
@@ -188,9 +190,11 @@ export type Database = {
         Insert: {
           created_at?: string;
           deletion_status?: string;
+          folder_id?: string | null;
           id?: string;
           latest_version_id?: string | null;
           owner_id: string;
+          sort_order?: number;
           source_type: string;
           title: string;
           updated_at?: string;
@@ -198,14 +202,62 @@ export type Database = {
         Update: {
           created_at?: string;
           deletion_status?: string;
+          folder_id?: string | null;
           id?: string;
           latest_version_id?: string | null;
           owner_id?: string;
+          sort_order?: number;
           source_type?: string;
           title?: string;
           updated_at?: string;
         };
-        Relationships: [];
+        Relationships: [
+          {
+            foreignKeyName: 'documents_folder_owner_fkey';
+            columns: ['folder_id', 'owner_id'];
+            isOneToOne: false;
+            referencedRelation: 'folders';
+            referencedColumns: ['id', 'owner_id'];
+          },
+        ];
+      };
+      folders: {
+        Row: {
+          created_at: string;
+          id: string;
+          name: string;
+          owner_id: string;
+          parent_id: string | null;
+          sort_order: number;
+          updated_at: string;
+        };
+        Insert: {
+          created_at?: string;
+          id?: string;
+          name: string;
+          owner_id: string;
+          parent_id?: string | null;
+          sort_order?: number;
+          updated_at?: string;
+        };
+        Update: {
+          created_at?: string;
+          id?: string;
+          name?: string;
+          owner_id?: string;
+          parent_id?: string | null;
+          sort_order?: number;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'folders_parent_owner_fkey';
+            columns: ['parent_id', 'owner_id'];
+            isOneToOne: false;
+            referencedRelation: 'folders';
+            referencedColumns: ['id', 'owner_id'];
+          },
+        ];
       };
     };
     Views: {
@@ -214,6 +266,14 @@ export type Database = {
     Functions: {
       complete_document_deletion: {
         Args: { p_document_id: string; p_job_id: string };
+        Returns: undefined;
+      };
+      move_document: {
+        Args: { p_document_id: string; p_folder_id: string | null };
+        Returns: undefined;
+      };
+      move_folder: {
+        Args: { p_folder_id: string; p_parent_id: string | null };
         Returns: undefined;
       };
       request_document_deletion: {

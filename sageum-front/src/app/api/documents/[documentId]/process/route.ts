@@ -220,7 +220,12 @@ export async function POST(
     if (versionUpdateError) throw new ProcessingError('문서 처리 결과를 확정하지 못했습니다.');
 
     const indexedDocument: IndexedDocument = {
-      document: { ...parsed, blocks: [] },
+      document: {
+        ...parsed,
+        folderId: documentResult.data.folder_id,
+        sortOrder: documentResult.data.sort_order,
+        blocks: [],
+      },
       chunks,
       status: 'ready',
       indexedAt: processedAt,

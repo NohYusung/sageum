@@ -10,6 +10,8 @@
 ## 주요 기능
 
 - Supabase 이메일 인증과 사용자별 문서 격리
+- 중첩 가능한 가상 폴더와 문서·폴더 드래그 이동
+- 폴더를 지정한 직접 업로드와 하위 폴더 포함 RAG 검색
 - MD, TXT, HTML, PDF, DOCX, XLSX 업로드
 - 형식별 구조 보존
   - PDF: 페이지
@@ -50,6 +52,7 @@ flowchart LR
   - 원본 파일명은 PostgreSQL 메타데이터에 보존합니다.
 - Supabase PostgreSQL
   - `documents`: 사용자 소유 문서와 최신 버전
+  - `folders`: 사용자 가상 폴더와 상위 폴더 관계
   - `document_versions`: Storage 경로, MIME, 처리 상태, 해시
   - `document_chunks`: 청크 본문과 제목·페이지·시트 위치
   - `document_deletion_jobs`: 외부 리소스 삭제 상태와 재시도 정보
@@ -76,6 +79,15 @@ flowchart LR
 6. PostgreSQL에 청크를 저장합니다.
 7. Qdrant Cloud Inference로 dense·sparse 벡터를 생성하고 색인합니다.
 8. 전체 과정이 끝나면 문서 버전을 `ready`로 전환합니다.
+
+### 폴더 관리
+
+1. 폴더 계층은 PostgreSQL의 `folders.parent_id`로 관리합니다.
+2. 문서 이동은 `documents.folder_id`만 갱신하고 Storage 원본은 이동하지 않습니다.
+3. 폴더 이동은 자기 자신이나 하위 폴더 아래로 들어가는 순환 구조를 거부합니다.
+4. 문서·폴더 드래그 이동은 낙관적으로 반영하고 서버 실패 시 원래 위치로 복구합니다.
+5. 폴더 범위 질문은 해당 폴더와 모든 하위 폴더의 문서 ID만 Qdrant 필터로 전달합니다.
+6. 폴더 이동은 본문이 변하지 않으므로 Qdrant 재임베딩을 수행하지 않습니다.
 
 ### 질문과 답변
 
@@ -168,6 +180,7 @@ npm run dev
 - private `documents` Storage bucket을 준비합니다.
 - `documents`, `document_versions`, `document_chunks` 테이블과 사용자별 RLS 정책이 필요합니다.
 - 삭제 정합성 스키마는 `docs/document-deletion-schema.sql`을 적용합니다.
+- 가상 폴더 스키마는 `docs/folder-management-schema.sql`에 기록되어 있습니다.
 - Storage와 데이터베이스의 사용자 소유권은 모두 로그인한 `auth.uid()`를 기준으로 제한합니다.
 
 ### Qdrant

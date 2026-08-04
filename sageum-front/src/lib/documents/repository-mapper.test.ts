@@ -11,9 +11,11 @@ const document: StoredDocument = {
   id: 'document-id',
   owner_id: 'owner-id',
   deletion_status: 'active',
+  folder_id: null,
   title: '운영 정책',
   source_type: 'markdown',
   latest_version_id: 'version-id',
+  sort_order: 0,
   created_at: '2026-08-02T00:00:00.000Z',
   updated_at: '2026-08-02T00:01:00.000Z',
 };
@@ -55,6 +57,7 @@ test('Supabase 문서 행을 클라이언트 검색 모델로 복원한다', () 
   const indexed = mapStoredDocument(document, version, [chunk]);
 
   assert.equal(indexed.document.versionId, 'version-id');
+  assert.equal(indexed.document.folderId, null);
   assert.equal(indexed.document.sourceType, 'markdown');
   assert.equal(indexed.status, 'ready');
   assert.equal(indexed.indexedAt, '2026-08-02T00:02:00.000Z');

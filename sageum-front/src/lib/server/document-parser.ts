@@ -233,8 +233,8 @@ export async function parseDocumentSourceWithHash(
   input: ParseDocumentInput,
 ) {
   // PDF.js can transfer the supplied Uint8Array to a worker and detach its buffer.
-  // Calculate the content hash before the parser takes ownership of the bytes.
+  // Keep the caller-owned bytes reusable for later steps such as visual OCR.
   const contentHash = createHash('sha256').update(bytes).digest('hex');
-  const document = await parseDocumentSource(bytes, input);
+  const document = await parseDocumentSource(bytes.slice(), input);
   return { document, contentHash };
 }

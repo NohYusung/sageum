@@ -39,18 +39,23 @@ test('PDF를 페이지별 블록과 페이지 경계 청크로 변환한다', as
   assert.equal(parserVersion(document.sourceType), 'pdf-v1');
 });
 
-test('PDF 파서가 입력 버퍼를 분리해도 파싱 전에 원본 해시를 보존한다', async () => {
-  const bytes = await fixture('sample-policy.pdf');
-  const sizeBytes = bytes.byteLength;
-  const { document, contentHash } = await parseDocumentSourceWithHash(bytes, {
+test('PDF 파싱 후 호출자 원본 버퍼를 OCR 입력으로 다시 사용할 수 있다', async () => {
+  const fixtureBytes = await fixture('sample-policy.pdf');
+  const fileBuffer = fixtureBytes.slice().buffer;
+  const parserInput = new Uint8Array(fileBuffer);
+  const sizeBytes = parserInput.byteLength;
+  const { document, contentHash } = await parseDocumentSourceWithHash(parserInput, {
     name: 'sample-policy.pdf',
     mimeType: 'application/pdf',
     sizeBytes,
   });
+  const ocrInput = new Uint8Array(fileBuffer);
 
   assert.equal(document.sourceType, 'pdf');
   assert.equal(contentHash, '3d9e98fd9cd9d074217be8f26b5733c6944f0be18a8645f6a9b836ae88d824d8');
-  assert.equal(bytes.buffer.byteLength, 0);
+  assert.equal(parserInput.byteLength, sizeBytes);
+  assert.equal(ocrInput.byteLength, sizeBytes);
+  assert.deepEqual(ocrInput, fixtureBytes);
 });
 
 test('DOCX 제목·문단·목록·표와 제목 계층을 보존한다', async () => {

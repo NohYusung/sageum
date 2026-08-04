@@ -1476,8 +1476,16 @@ svg {
 
 .document-layout {
   display: grid;
-  grid-template-columns: 210px minmax(320px, 1fr) minmax(400px, 41%);
+  grid-template-columns:
+    minmax(0, 210px)
+    minmax(0, 1fr)
+    0
+    minmax(400px, var(--document-inspector-width, 560px));
   min-height: calc(100dvh - 150px);
+}
+
+.document-layout.no-inspector {
+  grid-template-columns: minmax(0, 210px) minmax(0, 1fr);
 }
 
 .folder-navigation {
@@ -1485,8 +1493,9 @@ svg {
   top: 91px;
   align-self: start;
   height: calc(100dvh - 91px);
+  min-width: 0;
   padding: 20px 12px;
-  overflow-y: auto;
+  overflow: hidden auto;
   border-right: 1px solid var(--line);
   background: #f5f5f0;
 }
@@ -1590,9 +1599,11 @@ svg {
 }
 
 .repository-browser {
+  container-name: repository;
+  container-type: inline-size;
   min-width: 0;
   padding-bottom: 40px;
-  border-right: 1px solid var(--line);
+  border-right: 0;
 }
 
 .repository-browser-heading {
@@ -1611,6 +1622,12 @@ svg {
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.repository-location-summary {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 10px;
 }
 
 .folder-actions {
@@ -1639,195 +1656,299 @@ svg {
   font-size: 9px;
 }
 
-.folder-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(155px, 1fr));
-  gap: 8px;
-  padding: 0 clamp(20px, 2.5vw, 32px) 14px;
-}
-
-.folder-grid > button {
-  display: grid;
-  grid-template-columns: 35px minmax(0, 1fr) auto;
-  grid-template-rows: auto auto;
+.repository-explorer-toolbar {
+  display: flex;
   align-items: center;
-  gap: 1px 9px;
+  justify-content: flex-end;
+  gap: 14px;
+  margin: 4px clamp(20px, 2.5vw, 32px) 9px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.repository-explorer-toolbar > div {
+  margin-right: auto;
   min-width: 0;
-  padding: 10px;
-  border: 1px solid var(--line);
-  border-radius: 9px;
-  background: var(--surface);
-  box-shadow: var(--shadow-small);
-  text-align: left;
 }
 
-.folder-grid > button > span {
-  display: grid;
-  grid-row: 1 / 3;
-  width: 35px;
-  height: 35px;
-  place-items: center;
-  border-radius: 8px;
-  background: var(--sage-soft);
-  color: var(--sage);
+.repository-explorer-toolbar strong,
+.repository-explorer-toolbar small {
+  display: block;
 }
 
-.folder-grid strong,
-.folder-grid small {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.folder-grid strong {
+.repository-explorer-toolbar strong {
+  color: var(--ink-soft);
   font-family: var(--display);
-  font-size: 12px;
+  font-size: 14px;
 }
 
-.folder-grid small {
+.repository-explorer-toolbar small {
+  margin-top: 2px;
   color: var(--faint);
-  font-size: 8px;
+  font-size: 10px;
 }
 
-.folder-grid > button > svg {
-  grid-column: 3;
-  grid-row: 1 / 3;
-  color: var(--faint);
+.repository-explorer-toolbar > span {
+  display: grid;
+  min-width: 24px;
+  height: 24px;
+  padding-inline: 7px;
+  place-items: center;
+  border-radius: 12px;
+  background: var(--sage-soft);
+  color: var(--sage-dark);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
 }
 
-.folder-grid > button:hover {
-  border-color: #b6c7bd;
-  background: var(--sage-pale);
+.document-sort-select {
+  display: grid;
+  grid-template-columns: 14px auto minmax(92px, auto) 13px;
+  align-items: center;
+  gap: 6px;
+  min-height: 31px;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.document-sort-select select {
+  appearance: none;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink-soft);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.document-sort-select > svg:last-child {
+  margin-left: -15px;
+  pointer-events: none;
+}
+
+.document-inspector-resizer {
+  position: sticky;
+  top: 91px;
+  z-index: 5;
+  align-self: start;
+  width: 14px;
+  height: calc(100dvh - 91px);
+  margin-inline: -7px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+body.resizing-document-inspector,
+body.resizing-document-inspector * {
+  cursor: col-resize !important;
+  user-select: none !important;
 }
 
 .folder-tree > button[draggable='true'],
-.folder-grid > button[draggable='true'],
-.document-list > button[draggable='true'] {
+.repository-entry-row[draggable='true'] {
   cursor: grab;
 }
 
 .folder-tree > button[draggable='true']:active,
-.folder-grid > button[draggable='true']:active,
-.document-list > button[draggable='true']:active {
+.repository-entry-row[draggable='true']:active {
   cursor: grabbing;
 }
 
 .drop-target,
 .folder-tree-root.drop-target,
 .folder-tree > button.drop-target,
-.folder-grid > button.drop-target,
-.document-list.drop-target {
+.repository-entry-row.drop-target,
+.repository-entry-list.drop-target {
   border-color: var(--sage) !important;
   background: var(--sage-soft) !important;
   box-shadow: inset 0 0 0 2px rgb(73 107 91 / 12%);
 }
 
-.document-list {
+.repository-entry-list {
   min-height: 210px;
   margin: 0 clamp(20px, 2.5vw, 32px);
-  padding: 2px 0 24px;
-  border: 1px solid transparent;
-  border-radius: 10px;
-}
-
-.document-list > button {
-  display: grid;
-  grid-template-columns: 42px minmax(0, 1fr) auto 20px;
-  align-items: center;
-  gap: 13px;
-  width: 100%;
-  margin-bottom: 8px;
-  padding: 12px 13px;
+  overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 10px;
   background: var(--surface);
-  box-shadow: var(--shadow-small);
+}
+
+.repository-entry-header,
+.repository-entry-row {
+  display: grid;
+  grid-template-columns: minmax(170px, 1fr) minmax(86px, .42fr) minmax(84px, .35fr) minmax(96px, .42fr) 18px;
+  align-items: center;
+  gap: 12px;
+}
+
+.repository-entry-header {
+  min-height: 36px;
+  padding: 8px 13px;
+  border-bottom: 1px solid var(--line);
+  background: #f5f5f0;
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: .03em;
+}
+
+.repository-entry-row {
+  width: 100%;
+  min-height: 60px;
+  padding: 9px 13px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
   text-align: left;
-  transition: 120ms ease;
+  transition: background 100ms ease;
 }
 
-.document-list > button:hover {
-  border-color: #c7d1ca;
-  transform: translateY(-1px);
+.repository-entry-row:last-of-type {
+  border-bottom: 0;
 }
 
-.document-list > button.selected {
-  border-color: #afc4b8;
+.repository-entry-row:hover,
+.repository-entry-row:focus-visible {
   background: var(--sage-pale);
-  box-shadow: 0 0 0 2px rgb(73 107 91 / 6%);
+  outline: 0;
 }
 
-.file-icon,
+.repository-entry-row.selected {
+  background: #e3ede7;
+}
+
+.repository-entry-name {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.repository-entry-name > span:last-child,
+.repository-entry-name strong,
+.repository-entry-name small {
+  display: block;
+  min-width: 0;
+}
+
+.repository-entry-name strong,
+.repository-entry-name small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.repository-entry-name strong {
+  font-family: var(--display);
+  font-size: 14px;
+}
+
+.repository-entry-name small {
+  margin-top: 3px;
+  color: var(--faint);
+  font-size: 10px;
+}
+
+.repository-entry-icon,
 .large-file-icon {
   display: grid;
   place-items: center;
-  border-radius: 9px;
+  border-radius: 7px;
 }
 
-.file-icon {
+.repository-entry-icon {
   width: 42px;
   height: 42px;
   background: var(--sage-soft);
   color: var(--sage);
 }
 
-.file-icon.html,
-.file-icon.markdown,
+.repository-entry-icon.folder {
+  background: #eef1eb;
+  color: #65796d;
+}
+
+.repository-entry-icon.html,
+.repository-entry-icon.markdown,
 .large-file-icon.html,
 .large-file-icon.markdown {
   background: var(--amber-soft);
   color: var(--amber);
 }
 
-.file-icon.xlsx,
+.repository-entry-icon.xlsx,
 .large-file-icon.xlsx {
   background: var(--blue-soft);
   color: var(--blue);
 }
 
-.document-name,
-.document-name strong,
-.document-name small,
-.document-meta,
-.document-meta strong,
-.document-meta small {
-  display: block;
+.repository-entry-kind,
+.repository-entry-size,
+.repository-entry-date {
   min-width: 0;
-}
-
-.document-name strong {
-  overflow: hidden;
-  font-family: var(--display);
-  font-size: 14px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.document-name small {
-  margin-top: 3px;
   overflow: hidden;
   color: var(--muted);
-  font-size: 9px;
+  font-size: 10px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.document-meta {
-  padding-left: 16px;
-  border-left: 1px solid var(--line);
-  text-align: right;
-}
-
-.document-meta strong {
-  color: var(--ink-soft);
+.repository-entry-kind,
+.repository-entry-size {
   font-family: var(--mono);
-  font-size: 9px;
 }
 
-.document-meta small {
-  margin-top: 3px;
+.repository-entry-action {
+  justify-self: center;
   color: var(--faint);
-  font-size: 9px;
+}
+
+@container repository (max-width: 620px) {
+  .repository-entry-header,
+  .repository-entry-row {
+    grid-template-columns: minmax(0, 1fr) minmax(88px, .38fr) 18px;
+  }
+
+  .repository-entry-kind,
+  .repository-entry-size {
+    display: none;
+  }
+}
+
+@container repository (max-width: 440px) {
+  .repository-explorer-toolbar {
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+
+  .repository-explorer-toolbar > div {
+    flex-basis: calc(100% - 40px);
+  }
+
+  .document-sort-select {
+    width: 100%;
+    grid-template-columns: 14px auto minmax(0, 1fr) 13px;
+  }
+
+  .repository-entry-header,
+  .repository-entry-row {
+    grid-template-columns: minmax(0, 1fr) 18px;
+  }
+
+  .repository-entry-date {
+    display: none;
+  }
 }
 
 .ready-icon {
@@ -1876,6 +1997,7 @@ svg {
   height: calc(100dvh - 91px);
   padding: 26px clamp(20px, 2.5vw, 32px) 36px;
   overflow-y: auto;
+  border-left: 1px solid var(--line);
   background: #f1f0ea;
 }
 
@@ -2097,7 +2219,7 @@ svg {
 }
 
 .document-preview-frame {
-  height: clamp(320px, 42dvh, 540px);
+  height: clamp(460px, 62dvh, 760px);
   overflow: hidden;
   border: 1px solid var(--line-strong);
   border-radius: 10px;
@@ -2235,6 +2357,140 @@ svg {
   line-height: 1.65;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
+}
+
+.source-document-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  justify-items: end;
+  padding: 16px;
+  background: rgb(23 31 27 / 42%);
+  backdrop-filter: blur(5px);
+}
+
+.source-document-modal {
+  display: flex;
+  width: min(920px, calc(100vw - 32px));
+  height: calc(100dvh - 32px);
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid rgb(255 255 255 / 55%);
+  border-radius: 18px;
+  background: #f1f0ea;
+  box-shadow: 0 28px 90px rgb(15 24 19 / 32%);
+  flex-direction: column;
+  animation: source-document-modal-enter 180ms ease-out;
+}
+
+.source-document-modal-header {
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  min-height: 76px;
+  padding: 14px 18px 14px 24px;
+  border-bottom: 1px solid var(--line-strong);
+  background: rgb(251 251 248 / 94%);
+  backdrop-filter: blur(14px);
+}
+
+.source-document-modal-header > div {
+  min-width: 0;
+}
+
+.source-document-modal-header strong,
+.source-document-modal-header small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.source-document-modal-header strong {
+  margin-top: 3px;
+  font-family: var(--display);
+  font-size: 17px;
+  font-weight: 650;
+}
+
+.source-document-modal-header small {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.source-document-modal-header > button {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  flex: none;
+  place-items: center;
+  border: 1px solid var(--line-strong);
+  border-radius: 50%;
+  background: var(--paper);
+  color: var(--ink-soft);
+  transition: 120ms ease;
+}
+
+.source-document-modal-header > button:hover,
+.source-document-modal-header > button:focus-visible {
+  border-color: var(--sage);
+  background: var(--sage-dark);
+  color: white;
+}
+
+.source-document-modal .document-inspector-modal {
+  position: static;
+  width: 100%;
+  height: auto;
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  border: 0;
+}
+
+.source-document-modal .document-preview-frame {
+  height: clamp(460px, 62dvh, 760px);
+}
+
+@keyframes source-document-modal-enter {
+  from {
+    opacity: 0;
+    transform: translateX(24px) scale(0.99);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
+@media (max-width: 720px) {
+  .source-document-modal-backdrop {
+    padding: 0;
+  }
+
+  .source-document-modal {
+    width: 100%;
+    height: 100dvh;
+    border: 0;
+    border-radius: 0;
+  }
+
+  .source-document-modal-header {
+    padding-inline: 18px 12px;
+  }
+
+  .source-document-modal .document-inspector-modal {
+    padding-inline: 18px;
+  }
+
+  .source-document-modal .document-preview-frame {
+    height: min(520px, 64dvh);
+  }
 }
 
 .upload-content {
@@ -2474,11 +2730,16 @@ svg {
     grid-template-columns: 200px minmax(0, 1fr);
   }
 
+  .document-inspector-resizer {
+    display: none;
+  }
+
   .document-inspector {
     grid-column: 1 / -1;
     position: static;
     height: auto;
     overflow: visible;
+    border-left: 0;
     border-top: 1px solid var(--line);
   }
 
@@ -2527,10 +2788,6 @@ svg {
   }
 
   .repository-browser {
-    border-right: 0;
-  }
-
-  .document-list {
     border-right: 0;
   }
 
@@ -2694,10 +2951,6 @@ svg {
     display: none;
   }
 
-  .document-list {
-    padding-inline: 16px;
-  }
-
   .upload-content {
     width: calc(100% - 30px);
     padding-top: 24px;
@@ -2770,21 +3023,23 @@ svg {
     flex-direction: column;
   }
 
+  .repository-explorer-toolbar {
+    align-items: stretch;
+    flex-wrap: wrap;
+    flex-direction: column;
+  }
+
+  .repository-explorer-toolbar > div {
+    margin-right: 0;
+  }
+
+  .document-sort-select {
+    width: 100%;
+    grid-template-columns: 14px auto minmax(0, 1fr) 13px;
+  }
+
   .folder-actions {
     justify-content: flex-start;
-  }
-
-  .document-list > button {
-    grid-template-columns: 38px minmax(0, 1fr) 18px;
-  }
-
-  .file-icon {
-    width: 38px;
-    height: 38px;
-  }
-
-  .document-meta {
-    display: none;
   }
 
   .document-inspector {

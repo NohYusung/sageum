@@ -1,6 +1,7 @@
 'use client';
 
 import {
+  ArrowDownAZ,
   Bot,
   CheckCircle2,
   ChevronDown,
@@ -30,13 +31,16 @@ import {
   Sparkles,
   Trash2,
   UploadCloud,
+  X,
   XCircle,
 } from 'lucide-react';
 import Link from 'next/link';
 import {
+  type CSSProperties,
   type FormEvent,
   type DragEvent,
   type KeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
   useEffect,
   useMemo,
   useRef,
@@ -45,6 +49,11 @@ import {
 import { logoutAction } from '@/app/actions';
 import { deleteStoredDocument } from '@/lib/documents/browser-delete';
 import { uploadAndProcessDocument } from '@/lib/documents/browser-upload';
+import {
+  sortRepositoryDocuments,
+  sortRepositoryFolders,
+  type DocumentSort,
+} from '@/lib/documents/repository-sort';
 import {
   createFolder,
   deleteFolder,
@@ -73,6 +82,12 @@ import {
 import type { DocumentChunk } from '@/lib/rag/types';
 
 type View = 'chat' | 'documents' | 'upload';
+type InspectorResizeStart = {
+  pointerId: number;
+  clientX: number;
+  width: number;
+  maxWidth: number;
+};
 
 type ChatMessage = {
   id: string;
@@ -122,8 +137,13 @@ const INITIAL_MESSAGES: ChatMessage[] = [
 ];
 
 const DOCUMENT_PREVIEW_FRAME_NAME = 'sageum-document-preview';
+const SOURCE_PREVIEW_FRAME_NAME = 'sageum-source-preview';
 const DOCUMENT_DRAG_TYPE = 'application/x-sageum-document';
 const FOLDER_DRAG_TYPE = 'application/x-sageum-folder';
+const DOCUMENT_INSPECTOR_WIDTH_KEY = 'sageum:document-inspector-width';
+const DOCUMENT_INSPECTOR_DEFAULT_WIDTH = 560;
+const DOCUMENT_INSPECTOR_MIN_WIDTH = 400;
+const DOCUMENT_INSPECTOR_MAX_VIEWPORT_RATIO = 0.74;
 
 function SageumMark() {
   return (
@@ -223,6 +243,10 @@ function fileIcon(type: IndexedDocument['document']['sourceType']) {
   return FileText;
 }
 
+function clamp(value: number, minimum: number, maximum: number) {
+  return Math.min(Math.max(value, minimum), maximum);
+}
+
 function documentPreviewUrl(documentId: string, chunk?: DocumentChunk) {
   const params = new URLSearchParams({ embedded: '1' });
   if (chunk) params.set('chunk', chunk.id);
@@ -231,6 +255,164 @@ function documentPreviewUrl(documentId: string, chunk?: DocumentChunk) {
   if (!chunk) return base;
   if (chunk.location.page !== undefined) return base;
   return `${base}#block-${chunk.focusBlock}`;
+}
+
+function DocumentInspector({
+  item,
+  folderTree,
+  expandedStructureChunkId,
+  deletingDocumentId,
+  documentActionError,
+  frameName,
+  modal = false,
+  onMoveDocument,
+  onDeleteDocument,
+  onExpandStructure,
+}: {
+  item: IndexedDocument;
+  folderTree: ReturnType<typeof flattenFolderTree>;
+  expandedStructureChunkId: string | null;
+  deletingDocumentId: string | null;
+  documentActionError: string | null;
+  frameName: string;
+  modal?: boolean;
+  onMoveDocument: (documentId: string, folderId: string | null) => void | Promise<void>;
+  onDeleteDocument: (item: IndexedDocument) => void | Promise<void>;
+  onExpandStructure: (chunkId: string) => void;
+}) {
+  const DocumentIcon = fileIcon(item.document.sourceType);
+  const previewChunk = item.chunks.find((chunk) => chunk.id === expandedStructureChunkId);
+  const snippetPrefix = modal ? 'modal-structure-snippet' : 'structure-snippet';
+
+  return (
+    <aside className={`document-inspector${modal ? ' document-inspector-modal' : ''}`}>
+      <span className={`large-file-icon ${item.document.sourceType}`}>
+        <DocumentIcon size={28} />
+      </span>
+      <span className="eyebrow">DOCUMENT DETAIL</span>
+      <h2>{item.document.title}</h2>
+      <p>{item.document.name}</p>
+      <dl>
+        <div><dt>형식</dt><dd>{item.document.sourceType.toUpperCase()}</dd></div>
+        <div><dt>크기</dt><dd>{formatBytes(item.document.sizeBytes)}</dd></div>
+        <div><dt>청크</dt><dd>{item.chunks.length}</dd></div>
+        <div><dt>인덱싱</dt><dd>{formatDate(item.indexedAt)}</dd></div>
+      </dl>
+      <label className="document-folder-select">
+        <span><FolderInput size={14} /> 저장 위치</span>
+        <select
+          aria-label="문서 이동 폴더"
+          value={item.document.folderId ?? ''}
+          onChange={(event) => void onMoveDocument(
+            item.document.id,
+            event.target.value || null,
+          )}
+        >
+          <option value="">내 문서</option>
+          {folderTree.map((folder) => (
+            <option key={folder.id} value={folder.id}>
+              {`${'　'.repeat(folder.depth)}${folder.name}`}
+            </option>
+          ))}
+        </select>
+        <ChevronDown size={13} />
+      </label>
+      {documentActionError ? (
+        <p className="document-action-error" role="alert">{documentActionError}</p>
+      ) : null}
+      <div className="document-preview-sticky">
+        <div className="document-preview-heading">
+          <h3>{item.status === 'deleting' ? '삭제 대기 중' : '원본 미리보기'}</h3>
+          <div className="document-preview-actions">
+            {item.status !== 'deleting' ? (
+              <a
+                className="document-download-action"
+                href={`/api/documents/${encodeURIComponent(item.document.id)}/original?disposition=attachment`}
+              >
+                <Download size={14} />
+                다운로드
+              </a>
+            ) : null}
+            <button
+              className="document-delete-action"
+              type="button"
+              disabled={deletingDocumentId !== null}
+              onClick={() => void onDeleteDocument(item)}
+            >
+              {deletingDocumentId === item.document.id ? (
+                <LoaderCircle size={14} className="spin" />
+              ) : (
+                <Trash2 size={14} />
+              )}
+              {item.status === 'deleting' ? '삭제 재시도' : '삭제'}
+            </button>
+          </div>
+        </div>
+        {item.status === 'deleting' ? (
+          <div className="document-deletion-pending">
+            <Trash2 size={22} />
+            <strong>검색에서는 이미 제외됐습니다</strong>
+            <span>외부 리소스 정리가 실패했다면 삭제 재시도를 눌러 마무리하세요.</span>
+          </div>
+        ) : (
+          <div className="document-preview-frame">
+            <iframe
+              key={`${item.document.id}:${previewChunk?.id ?? 'default'}`}
+              name={frameName}
+              src={documentPreviewUrl(item.document.id, previewChunk)}
+              title={`${item.document.title} 원본 미리보기`}
+              sandbox={item.document.sourceType === 'pdf' ? undefined : ''}
+              referrerPolicy="no-referrer"
+            />
+          </div>
+        )}
+      </div>
+      {item.status !== 'deleting' ? (
+        <>
+          <div className="inspector-rule" />
+          <div className="structure-heading">
+            <h3>구조화 결과</h3>
+            <span>선택하면 원문 위치로 이동합니다</span>
+          </div>
+          <div className="structure-list">
+            {item.chunks.map((chunk) => {
+              const expanded = expandedStructureChunkId === chunk.id;
+              const snippetId = `${snippetPrefix}-${chunk.ordinal}`;
+              return (
+                <a
+                  aria-controls={snippetId}
+                  aria-expanded={expanded}
+                  href={documentPreviewUrl(item.document.id, chunk)}
+                  key={chunk.id}
+                  onClick={() => onExpandStructure(chunk.id)}
+                  target={frameName}
+                >
+                  <span>{chunk.ordinal + 1}</span>
+                  <div className="structure-list-content">
+                    <p>
+                      <strong>{chunk.headingPath.join(' › ') || '본문'}</strong>
+                      <small>
+                        {[chunkLocation(chunk.location), `${chunk.wordCount} words`]
+                          .filter(Boolean)
+                          .join(' · ')}
+                      </small>
+                      <small className="structure-range">{chunkRangeLabel(chunk)}</small>
+                    </p>
+                    {expanded ? (
+                      <p className="structure-snippet" id={snippetId}>{chunk.text}</p>
+                    ) : null}
+                  </div>
+                </a>
+              );
+            })}
+            {!item.chunks.length ? (
+              <p className="structure-list-empty">구조화된 본문 위치가 없습니다.</p>
+            ) : null}
+          </div>
+        </>
+      ) : null}
+    </aside>
+  );
 }
 
 export function DocumentRagApp({
@@ -248,6 +430,7 @@ export function DocumentRagApp({
   const [messages, setMessages] = useState<ChatMessage[]>(INITIAL_MESSAGES);
   const [query, setQuery] = useState('');
   const [documentFilter, setDocumentFilter] = useState('');
+  const [documentSort, setDocumentSort] = useState<DocumentSort>('name');
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
   const [searchFolderId, setSearchFolderId] = useState('');
   const [folderBusy, setFolderBusy] = useState(false);
@@ -257,6 +440,10 @@ export function DocumentRagApp({
     () => initialDocuments[0]?.document.id ?? '',
   );
   const [expandedStructureChunkId, setExpandedStructureChunkId] = useState<string | null>(null);
+  const [sourcePreview, setSourcePreview] = useState<SourceReference | null>(null);
+  const [inspectorWidth, setInspectorWidth] = useState(DOCUMENT_INSPECTOR_DEFAULT_WIDTH);
+  const [inspectorMaxWidth, setInspectorMaxWidth] = useState(DOCUMENT_INSPECTOR_DEFAULT_WIDTH);
+  const [inspectorResizeStart, setInspectorResizeStart] = useState<InspectorResizeStart | null>(null);
   const [activeSources, setActiveSources] = useState<SourceReference[]>([]);
   const [uploadMessage, setUploadMessage] = useState<string | null>(null);
   const [uploadBusy, setUploadBusy] = useState(false);
@@ -269,6 +456,10 @@ export function DocumentRagApp({
   const [system, setSystem] = useState<SystemStatus | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const conversationRef = useRef<HTMLDivElement | null>(null);
+  const documentLayoutRef = useRef<HTMLDivElement | null>(null);
+  const sourceModalRef = useRef<HTMLElement | null>(null);
+  const sourceModalCloseRef = useRef<HTMLButtonElement | null>(null);
+  const sourceModalTriggerRef = useRef<HTMLElement | null>(null);
   const userInitial = userEmail.charAt(0).toLocaleUpperCase('ko-KR') || '?';
 
   useEffect(() => {
@@ -283,6 +474,75 @@ export function DocumentRagApp({
     if (conversation) conversation.scrollTop = conversation.scrollHeight;
   }, [messages]);
 
+  useEffect(() => {
+    if (!sourcePreview) return;
+    const trigger = sourceModalTriggerRef.current;
+    const previousOverflow = document.body.style.overflow;
+    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setSourcePreview(null);
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      const modal = sourceModalRef.current;
+      if (!modal) return;
+      const focusable = Array.from(modal.querySelectorAll<HTMLElement>(
+        'a[href], button:not([disabled]), select:not([disabled]), iframe, [tabindex]:not([tabindex="-1"])',
+      ));
+      const first = focusable[0];
+      const last = focusable.at(-1);
+      if (!first || !last) return;
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.body.style.overflow = 'hidden';
+    window.addEventListener('keydown', handleKeyDown);
+    const focusFrame = window.requestAnimationFrame(() => sourceModalCloseRef.current?.focus());
+    return () => {
+      window.cancelAnimationFrame(focusFrame);
+      window.removeEventListener('keydown', handleKeyDown);
+      document.body.style.overflow = previousOverflow;
+      trigger?.focus();
+    };
+  }, [sourcePreview]);
+
+  useEffect(() => {
+    if (view !== 'documents') return;
+    const updateWidth = () => {
+      const { maxWidth } = inspectorWidthBounds();
+      setInspectorMaxWidth(maxWidth);
+      setInspectorWidth((current) => clamp(
+        current,
+        DOCUMENT_INSPECTOR_MIN_WIDTH,
+        maxWidth,
+      ));
+    };
+    const savedWidth = Number.parseInt(
+      window.localStorage.getItem(DOCUMENT_INSPECTOR_WIDTH_KEY) ?? '',
+      10,
+    );
+    const { maxWidth } = inspectorWidthBounds();
+    setInspectorMaxWidth(maxWidth);
+    setInspectorWidth(clamp(
+      Number.isFinite(savedWidth) ? savedWidth : DOCUMENT_INSPECTOR_DEFAULT_WIDTH,
+      DOCUMENT_INSPECTOR_MIN_WIDTH,
+      maxWidth,
+    ));
+    window.addEventListener('resize', updateWidth);
+    return () => window.removeEventListener('resize', updateWidth);
+  }, [view]);
+
+  useEffect(() => {
+    if (!inspectorResizeStart) return;
+    document.body.classList.add('resizing-document-inspector');
+    return () => document.body.classList.remove('resizing-document-inspector');
+  }, [inspectorResizeStart]);
+
   const folderTree = useMemo(() => flattenFolderTree(folders), [folders]);
   const selectedFolder = useMemo(
     () => folders.find((folder) => folder.id === selectedFolderId) ?? null,
@@ -293,12 +553,33 @@ export function DocumentRagApp({
     [folders, selectedFolderId],
   );
   const childFolders = useMemo(
-    () => folders
-      .filter((folder) => folder.parentId === selectedFolderId)
-      .toSorted((left, right) => left.sortOrder - right.sortOrder
-        || left.name.localeCompare(right.name, 'ko-KR', { numeric: true, sensitivity: 'base' })),
+    () => folders.filter((folder) => folder.parentId === selectedFolderId),
     [folders, selectedFolderId],
   );
+  const filteredChildFolders = useMemo(() => {
+    const term = documentFilter.trim().toLocaleLowerCase('ko-KR');
+    const matchingFolders = term
+      ? childFolders.filter((folder) => folder.name.toLocaleLowerCase('ko-KR').includes(term))
+      : childFolders;
+    return sortRepositoryFolders(matchingFolders, documentSort);
+  }, [childFolders, documentFilter, documentSort]);
+  const folderContentCounts = useMemo(() => {
+    const counts = new Map<string | null, { folders: number; documents: number }>();
+    const countFor = (folderId: string | null) => {
+      const existing = counts.get(folderId);
+      if (existing) return existing;
+      const created = { folders: 0, documents: 0 };
+      counts.set(folderId, created);
+      return created;
+    };
+    folders.forEach((folder) => {
+      countFor(folder.parentId).folders += 1;
+    });
+    documents.forEach(({ document }) => {
+      countFor(document.folderId ?? null).documents += 1;
+    });
+    return counts;
+  }, [documents, folders]);
   const totalChunks = useMemo(
     () => documents.reduce((sum, document) => sum + document.chunks.length, 0),
     [documents],
@@ -306,20 +587,105 @@ export function DocumentRagApp({
   const filteredDocuments = useMemo(() => {
     const term = documentFilter.trim().toLocaleLowerCase('ko-KR');
     const currentDocuments = documentsInFolderScope(documents, folders, selectedFolderId);
-    if (!term) return currentDocuments;
-    return currentDocuments.filter(({ document }) =>
-      `${document.title} ${document.name}`.toLocaleLowerCase('ko-KR').includes(term),
-    );
-  }, [documentFilter, documents, folders, selectedFolderId]);
+    const matchingDocuments = term
+      ? currentDocuments.filter(({ document }) =>
+        `${document.title} ${document.name}`.toLocaleLowerCase('ko-KR').includes(term))
+      : currentDocuments;
+    return sortRepositoryDocuments(matchingDocuments, documentSort);
+  }, [documentFilter, documentSort, documents, folders, selectedFolderId]);
+  const filteredChunkCount = useMemo(
+    () => filteredDocuments.reduce((sum, document) => sum + document.chunks.length, 0),
+    [filteredDocuments],
+  );
   const selectedDocument = useMemo(
     () => filteredDocuments.find(({ document }) => document.id === selectedDocumentId)
       ?? filteredDocuments[0],
     [filteredDocuments, selectedDocumentId],
   );
-  const selectedPreviewChunk = selectedDocument?.chunks.find(
-    (chunk) => chunk.id === expandedStructureChunkId,
-  );
-  const SelectedDocumentIcon = selectedDocument ? fileIcon(selectedDocument.document.sourceType) : FileText;
+  const sourcePreviewDocument = sourcePreview
+    ? documents.find(({ document }) => document.id === sourcePreview.documentId)
+    : undefined;
+
+  function inspectorWidthBounds() {
+    const layoutWidth = documentLayoutRef.current?.getBoundingClientRect().width
+      ?? Math.max(window.innerWidth - 248, 0);
+    return {
+      maxWidth: Math.max(
+        DOCUMENT_INSPECTOR_MIN_WIDTH,
+        Math.min(
+          Math.floor(window.innerWidth * DOCUMENT_INSPECTOR_MAX_VIEWPORT_RATIO),
+          layoutWidth,
+        ),
+      ),
+    };
+  }
+
+  function inspectorWidthFromPointer(clientX: number, start: InspectorResizeStart) {
+    return clamp(
+      start.width + start.clientX - clientX,
+      DOCUMENT_INSPECTOR_MIN_WIDTH,
+      start.maxWidth,
+    );
+  }
+
+  function handleInspectorResizeStart(event: ReactPointerEvent<HTMLDivElement>) {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setInspectorResizeStart({
+      pointerId: event.pointerId,
+      clientX: event.clientX,
+      width: inspectorWidth,
+      maxWidth: inspectorWidthBounds().maxWidth,
+    });
+  }
+
+  function handleInspectorResizeMove(event: ReactPointerEvent<HTMLDivElement>) {
+    if (!inspectorResizeStart || event.pointerId !== inspectorResizeStart.pointerId) return;
+    setInspectorWidth(inspectorWidthFromPointer(event.clientX, inspectorResizeStart));
+  }
+
+  function handleInspectorResizeEnd(event: ReactPointerEvent<HTMLDivElement>) {
+    if (!inspectorResizeStart || event.pointerId !== inspectorResizeStart.pointerId) return;
+    const nextWidth = inspectorWidthFromPointer(event.clientX, inspectorResizeStart);
+    setInspectorWidth(nextWidth);
+    setInspectorResizeStart(null);
+    window.localStorage.setItem(DOCUMENT_INSPECTOR_WIDTH_KEY, String(nextWidth));
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  }
+
+  function handleInspectorResizeCancel(event: ReactPointerEvent<HTMLDivElement>) {
+    setInspectorResizeStart(null);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  }
+
+  function resetInspectorWidth() {
+    const nextWidth = clamp(
+      DOCUMENT_INSPECTOR_DEFAULT_WIDTH,
+      DOCUMENT_INSPECTOR_MIN_WIDTH,
+      inspectorWidthBounds().maxWidth,
+    );
+    setInspectorWidth(nextWidth);
+    window.localStorage.setItem(DOCUMENT_INSPECTOR_WIDTH_KEY, String(nextWidth));
+  }
+
+  function handleInspectorResizeKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    const { maxWidth } = inspectorWidthBounds();
+    let nextWidth = inspectorWidth;
+    if (event.key === 'ArrowLeft') nextWidth += 32;
+    else if (event.key === 'ArrowRight') nextWidth -= 32;
+    else if (event.key === 'Home') nextWidth = DOCUMENT_INSPECTOR_MIN_WIDTH;
+    else if (event.key === 'End') nextWidth = maxWidth;
+    else return;
+    event.preventDefault();
+    nextWidth = clamp(nextWidth, DOCUMENT_INSPECTOR_MIN_WIDTH, maxWidth);
+    setInspectorWidth(nextWidth);
+    window.localStorage.setItem(DOCUMENT_INSPECTOR_WIDTH_KEY, String(nextWidth));
+  }
 
   async function handleFiles(fileList: FileList | File[], folderId = selectedFolderId) {
     const files = Array.from(fileList);
@@ -495,6 +861,7 @@ export function DocumentRagApp({
       const nextDocument = remainingDocuments[Math.min(selectedIndex, remainingDocuments.length - 1)];
       setDocuments(remainingDocuments);
       setSelectedDocumentId(nextDocument?.document.id ?? '');
+      setSourcePreview((current) => current?.documentId === documentId ? null : current);
       setActiveSources((current) => current.filter((source) => source.documentId !== documentId));
       setMessages((current) => current.map((message) =>
         message.sources
@@ -573,11 +940,11 @@ export function DocumentRagApp({
   }
 
   function openSource(source: SourceReference) {
-    setSelectedDocumentId(source.documentId);
+    sourceModalTriggerRef.current = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
     setExpandedStructureChunkId(source.chunkId);
-    const sourceDocument = documents.find(({ document }) => document.id === source.documentId);
-    setSelectedFolderId(sourceDocument?.document.folderId ?? null);
-    setView('documents');
+    setSourcePreview(source);
   }
 
   return (
@@ -775,10 +1142,21 @@ export function DocumentRagApp({
                   onChange={(event) => setDocumentFilter(event.target.value)}
                 />
               </label>
-              <span>{filteredDocuments.length} documents · {totalChunks} chunks</span>
+              <span>
+                {filteredChildFolders.length} folders · {filteredDocuments.length} files ·{' '}
+                {filteredChunkCount} chunks
+              </span>
             </div>
 
-            <div className="document-layout">
+            <div
+              className={`document-layout ${selectedDocument ? 'has-inspector' : 'no-inspector'}${
+                inspectorResizeStart ? ' resizing' : ''
+              }`}
+              ref={documentLayoutRef}
+              style={{
+                '--document-inspector-width': `${inspectorWidth}px`,
+              } as CSSProperties}
+            >
               <aside className="folder-navigation">
                 <div className="folder-navigation-heading">
                   <span>FOLDERS</span>
@@ -798,7 +1176,10 @@ export function DocumentRagApp({
                 >
                   <Home size={16} />
                   내 문서
-                  <small>{documents.filter(({ document }) => !document.folderId).length}</small>
+                  <small title="현재 위치의 폴더와 문서 수">
+                    {(folderContentCounts.get(null)?.folders ?? 0)
+                      + (folderContentCounts.get(null)?.documents ?? 0)}
+                  </small>
                 </button>
                 <div className="folder-tree">
                   {folderTree.map((folder) => (
@@ -823,7 +1204,10 @@ export function DocumentRagApp({
                     >
                       <Folder size={15} />
                       <span>{folder.name}</span>
-                      <small>{documents.filter(({ document }) => document.folderId === folder.id).length}</small>
+                      <small title="이 폴더에 직접 포함된 폴더와 문서 수">
+                        {(folderContentCounts.get(folder.id)?.folders ?? 0)
+                          + (folderContentCounts.get(folder.id)?.documents ?? 0)}
+                      </small>
                     </button>
                   ))}
                 </div>
@@ -835,6 +1219,10 @@ export function DocumentRagApp({
                   <div>
                     <span className="eyebrow">CURRENT FOLDER</span>
                     <h2>{selectedFolder?.name ?? '내 문서'}</h2>
+                    <p className="repository-location-summary">
+                      하위 폴더 {childFolders.length}개 · 파일{' '}
+                      {folderContentCounts.get(selectedFolderId)?.documents ?? 0}개
+                    </p>
                   </div>
                   <div className="folder-actions">
                     <button type="button" onClick={() => void handleCreateFolder()} disabled={folderBusy}>
@@ -855,11 +1243,55 @@ export function DocumentRagApp({
 
                 {folderActionError ? <p className="folder-action-error" role="alert">{folderActionError}</p> : null}
 
-                {childFolders.length ? (
-                  <div className="folder-grid">
-                    {childFolders.map((folder) => (
+                <div className="repository-explorer-toolbar">
+                  <div>
+                    <strong>항목</strong>
+                    <small>
+                      {documentFilter
+                        ? '현재 폴더의 검색 결과'
+                        : '폴더와 파일을 한 목록에서 탐색합니다'}
+                    </small>
+                  </div>
+                  <span>{filteredChildFolders.length + filteredDocuments.length}개</span>
+                  <label className="document-sort-select">
+                    <ArrowDownAZ size={14} />
+                    <span>정렬</span>
+                    <select
+                      aria-label="폴더와 파일 정렬 기준"
+                      value={documentSort}
+                      onChange={(event) => setDocumentSort(event.target.value as DocumentSort)}
+                    >
+                      <option value="name">이름순</option>
+                      <option value="recent">최근 수정순</option>
+                      <option value="type">종류순</option>
+                    </select>
+                    <ChevronDown size={13} />
+                  </label>
+                </div>
+
+                <div
+                  className={`repository-entry-list ${dragOverFolderId === (selectedFolderId ?? 'root') ? 'drop-target' : ''}`}
+                  onDragOver={(event) => {
+                    if (!event.dataTransfer.types.includes('Files')) return;
+                    event.preventDefault();
+                    setDragOverFolderId(selectedFolderId ?? 'root');
+                  }}
+                  onDrop={(event) => handleFolderDrop(event, selectedFolderId)}
+                >
+                  <div className="repository-entry-header" aria-hidden="true">
+                    <span>이름</span>
+                    <span className="repository-entry-kind">종류</span>
+                    <span className="repository-entry-size">크기 / 항목</span>
+                    <span className="repository-entry-date">수정일</span>
+                    <span />
+                  </div>
+                  {filteredChildFolders.map((folder) => {
+                    const counts = folderContentCounts.get(folder.id);
+                    const itemCount = (counts?.folders ?? 0) + (counts?.documents ?? 0);
+                    return (
                       <button
-                        className={dragOverFolderId === folder.id ? 'drop-target' : ''}
+                        aria-label={`${folder.name} 폴더 열기`}
+                        className={`repository-entry-row folder-entry ${dragOverFolderId === folder.id ? 'drop-target' : ''}`}
                         draggable
                         key={folder.id}
                         type="button"
@@ -876,29 +1308,24 @@ export function DocumentRagApp({
                         }}
                         onDrop={(event) => handleFolderDrop(event, folder.id)}
                       >
-                        <span><Folder size={20} /></span>
-                        <strong>{folder.name}</strong>
-                        <small>{documents.filter(({ document }) => document.folderId === folder.id).length}개 문서</small>
-                        <ChevronRight size={15} />
+                        <span className="repository-entry-name">
+                          <span className="repository-entry-icon folder"><Folder size={19} /></span>
+                          <span><strong>{folder.name}</strong><small>폴더</small></span>
+                        </span>
+                        <span className="repository-entry-kind">폴더</span>
+                        <span className="repository-entry-size">{itemCount}개 항목</span>
+                        <span className="repository-entry-date">{formatDate(folder.updatedAt)}</span>
+                        <ChevronRight size={15} className="repository-entry-action" />
                       </button>
-                    ))}
-                  </div>
-                ) : null}
-
-                <div
-                  className={`document-list ${dragOverFolderId === (selectedFolderId ?? 'root') ? 'drop-target' : ''}`}
-                  onDragOver={(event) => {
-                    if (!event.dataTransfer.types.includes('Files')) return;
-                    event.preventDefault();
-                    setDragOverFolderId(selectedFolderId ?? 'root');
-                  }}
-                  onDrop={(event) => handleFolderDrop(event, selectedFolderId)}
-                >
+                    );
+                  })}
                   {filteredDocuments.map((item) => {
                     const Icon = fileIcon(item.document.sourceType);
                     return (
                       <button
-                        className={selectedDocument?.document.id === item.document.id ? 'selected' : ''}
+                        className={`repository-entry-row document-entry${
+                          selectedDocument?.document.id === item.document.id ? ' selected' : ''
+                        }`}
                         draggable
                         key={item.document.id}
                         type="button"
@@ -909,31 +1336,34 @@ export function DocumentRagApp({
                         }}
                         onDragEnd={() => setDragOverFolderId(null)}
                       >
-                        <span className={`file-icon ${item.document.sourceType}`}><Icon size={20} /></span>
-                        <span className="document-name">
-                          <strong>{item.document.title}</strong>
-                          <small>{item.document.name}</small>
+                        <span className="repository-entry-name">
+                          <span className={`repository-entry-icon ${item.document.sourceType}`}>
+                            <Icon size={19} />
+                          </span>
+                          <span>
+                            <strong>{item.document.title}</strong>
+                            <small>{item.document.name}</small>
+                          </span>
                         </span>
-                        <span className="document-meta">
-                          <strong>{item.chunks.length} chunks</strong>
-                          <small>
-                            {item.status === 'deleting' ? '삭제 재시도 필요' : formatBytes(item.document.sizeBytes)}
-                          </small>
+                        <span className="repository-entry-kind">
+                          {item.document.sourceType.toUpperCase()} · {item.chunks.length} chunks
                         </span>
+                        <span className="repository-entry-size">{formatBytes(item.document.sizeBytes)}</span>
+                        <span className="repository-entry-date">{formatDate(item.indexedAt)}</span>
                         {item.status === 'ready' ? (
-                          <CheckCircle2 size={17} className="ready-icon" />
+                          <CheckCircle2 size={16} className="ready-icon repository-entry-action" />
                         ) : item.status === 'failed' ? (
-                          <XCircle size={17} className="failed-icon" />
+                          <XCircle size={16} className="failed-icon repository-entry-action" />
                         ) : (
-                          <LoaderCircle size={17} className="processing-icon spin" />
+                          <LoaderCircle size={16} className="processing-icon spin repository-entry-action" />
                         )}
                       </button>
                     );
                   })}
-                  {!filteredDocuments.length ? (
+                  {!filteredChildFolders.length && !filteredDocuments.length ? (
                     <div className="document-list-empty">
                       <FolderOpen size={24} />
-                      <strong>{documentFilter ? '일치하는 문서가 없습니다' : '이 폴더가 비어 있습니다'}</strong>
+                      <strong>{documentFilter ? '일치하는 항목이 없습니다' : '이 폴더가 비어 있습니다'}</strong>
                       <span>파일을 이 영역이나 왼쪽 폴더로 드래그해 업로드할 수 있습니다.</span>
                     </div>
                   ) : null}
@@ -941,142 +1371,41 @@ export function DocumentRagApp({
               </div>
 
               {selectedDocument ? (
-                <aside className="document-inspector">
-                  <span className={`large-file-icon ${selectedDocument.document.sourceType}`}>
-                    <SelectedDocumentIcon size={28} />
-                  </span>
-                  <span className="eyebrow">DOCUMENT DETAIL</span>
-                  <h2>{selectedDocument.document.title}</h2>
-                  <p>{selectedDocument.document.name}</p>
-                  <dl>
-                    <div><dt>형식</dt><dd>{selectedDocument.document.sourceType.toUpperCase()}</dd></div>
-                    <div><dt>크기</dt><dd>{formatBytes(selectedDocument.document.sizeBytes)}</dd></div>
-                    <div><dt>청크</dt><dd>{selectedDocument.chunks.length}</dd></div>
-                    <div><dt>인덱싱</dt><dd>{formatDate(selectedDocument.indexedAt)}</dd></div>
-                  </dl>
-                  <label className="document-folder-select">
-                    <span><FolderInput size={14} /> 저장 위치</span>
-                    <select
-                      aria-label="문서 이동 폴더"
-                      value={selectedDocument.document.folderId ?? ''}
-                      onChange={(event) => void handleMoveDocument(
-                        selectedDocument.document.id,
-                        event.target.value || null,
-                      )}
-                    >
-                      <option value="">내 문서</option>
-                      {folderTree.map((folder) => (
-                        <option key={folder.id} value={folder.id}>
-                          {`${'　'.repeat(folder.depth)}${folder.name}`}
-                        </option>
-                      ))}
-                    </select>
-                    <ChevronDown size={13} />
-                  </label>
-                  {documentActionError?.documentId === selectedDocument.document.id ? (
-                    <p className="document-action-error" role="alert">
-                      {documentActionError.message}
-                    </p>
-                  ) : null}
-                  <div className="document-preview-sticky">
-                    <div className="document-preview-heading">
-                      <h3>
-                        {selectedDocument.status === 'deleting' ? '삭제 대기 중' : '원본 미리보기'}
-                      </h3>
-                      <div className="document-preview-actions">
-                        {selectedDocument.status !== 'deleting' ? (
-                          <a
-                            className="document-download-action"
-                            href={`/api/documents/${encodeURIComponent(selectedDocument.document.id)}/original?disposition=attachment`}
-                          >
-                            <Download size={14} />
-                            다운로드
-                          </a>
-                        ) : null}
-                        <button
-                          className="document-delete-action"
-                          type="button"
-                          disabled={deletingDocumentId !== null}
-                          onClick={() => handleDeleteDocument(selectedDocument)}
-                        >
-                          {deletingDocumentId === selectedDocument.document.id ? (
-                            <LoaderCircle size={14} className="spin" />
-                          ) : (
-                            <Trash2 size={14} />
-                          )}
-                          {selectedDocument.status === 'deleting' ? '삭제 재시도' : '삭제'}
-                        </button>
-                      </div>
-                    </div>
-                    {selectedDocument.status === 'deleting' ? (
-                      <div className="document-deletion-pending">
-                        <Trash2 size={22} />
-                        <strong>검색에서는 이미 제외됐습니다</strong>
-                        <span>외부 리소스 정리가 실패했다면 삭제 재시도를 눌러 마무리하세요.</span>
-                      </div>
-                    ) : (
-                      <div className="document-preview-frame">
-                        <iframe
-                          key={`${selectedDocument.document.id}:${selectedPreviewChunk?.id ?? 'default'}`}
-                          name={DOCUMENT_PREVIEW_FRAME_NAME}
-                          src={documentPreviewUrl(
-                            selectedDocument.document.id,
-                            selectedPreviewChunk,
-                          )}
-                          title={`${selectedDocument.document.title} 원본 미리보기`}
-                          sandbox={selectedDocument.document.sourceType === 'pdf' ? undefined : ''}
-                          referrerPolicy="no-referrer"
-                        />
-                      </div>
-                    )}
-                  </div>
-                  {selectedDocument.status !== 'deleting' ? (
-                    <>
-                      <div className="inspector-rule" />
-                      <div className="structure-heading">
-                        <h3>구조화 결과</h3>
-                        <span>선택하면 원문 위치로 이동합니다</span>
-                      </div>
-                      <div className="structure-list">
-                        {selectedDocument.chunks.map((chunk) => {
-                          const expanded = expandedStructureChunkId === chunk.id;
-                          const snippetId = `structure-snippet-${chunk.ordinal}`;
-                          return (
-                            <a
-                              aria-controls={snippetId}
-                              aria-expanded={expanded}
-                              href={documentPreviewUrl(selectedDocument.document.id, chunk)}
-                              key={chunk.id}
-                              onClick={() => setExpandedStructureChunkId(chunk.id)}
-                              target={DOCUMENT_PREVIEW_FRAME_NAME}
-                            >
-                              <span>{chunk.ordinal + 1}</span>
-                              <div className="structure-list-content">
-                                <p>
-                                  <strong>{chunk.headingPath.join(' › ') || '본문'}</strong>
-                                  <small>
-                                    {[chunkLocation(chunk.location), `${chunk.wordCount} words`]
-                                      .filter(Boolean)
-                                      .join(' · ')}
-                                  </small>
-                                  <small className="structure-range">{chunkRangeLabel(chunk)}</small>
-                                </p>
-                                {expanded ? (
-                                  <p className="structure-snippet" id={snippetId}>
-                                    {chunk.text}
-                                  </p>
-                                ) : null}
-                              </div>
-                            </a>
-                          );
-                        })}
-                        {!selectedDocument.chunks.length ? (
-                          <p className="structure-list-empty">구조화된 본문 위치가 없습니다.</p>
-                        ) : null}
-                      </div>
-                    </>
-                  ) : null}
-                </aside>
+                <div
+                  aria-label="문서 상세 패널 너비 조절"
+                  aria-orientation="vertical"
+                  aria-valuemax={Math.round(inspectorMaxWidth)}
+                  aria-valuemin={DOCUMENT_INSPECTOR_MIN_WIDTH}
+                  aria-valuenow={Math.round(inspectorWidth)}
+                  className="document-inspector-resizer"
+                  role="separator"
+                  tabIndex={0}
+                  title="드래그하거나 방향키로 크기를 조절합니다. 더블 클릭하면 초기화됩니다."
+                  onDoubleClick={resetInspectorWidth}
+                  onKeyDown={handleInspectorResizeKeyDown}
+                  onPointerCancel={handleInspectorResizeCancel}
+                  onPointerDown={handleInspectorResizeStart}
+                  onPointerMove={handleInspectorResizeMove}
+                  onPointerUp={handleInspectorResizeEnd}
+                />
+              ) : null}
+
+              {selectedDocument ? (
+                <DocumentInspector
+                  item={selectedDocument}
+                  folderTree={folderTree}
+                  expandedStructureChunkId={expandedStructureChunkId}
+                  deletingDocumentId={deletingDocumentId}
+                  documentActionError={
+                    documentActionError?.documentId === selectedDocument.document.id
+                      ? documentActionError.message
+                      : null
+                  }
+                  frameName={DOCUMENT_PREVIEW_FRAME_NAME}
+                  onMoveDocument={handleMoveDocument}
+                  onDeleteDocument={handleDeleteDocument}
+                  onExpandStructure={setExpandedStructureChunkId}
+                />
               ) : null}
             </div>
           </section>
@@ -1173,6 +1502,58 @@ export function DocumentRagApp({
           </section>
         ) : null}
       </main>
+
+      {sourcePreview && sourcePreviewDocument ? (
+        <div
+          className="source-document-modal-backdrop"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setSourcePreview(null);
+          }}
+        >
+          <section
+            aria-labelledby="source-document-modal-title"
+            aria-modal="true"
+            className="source-document-modal"
+            ref={sourceModalRef}
+            role="dialog"
+          >
+            <header className="source-document-modal-header">
+              <div>
+                <span className="eyebrow">ANSWER EVIDENCE</span>
+                <strong id="source-document-modal-title">{sourcePreviewDocument.document.title}</strong>
+                <small>
+                  {[sourcePreview.heading, sourceLocation(sourcePreview)].filter(Boolean).join(' · ')}
+                </small>
+              </div>
+              <button
+                aria-label="근거 문서 닫기"
+                ref={sourceModalCloseRef}
+                title="채팅으로 돌아가기 (Esc)"
+                type="button"
+                onClick={() => setSourcePreview(null)}
+              >
+                <X size={20} />
+              </button>
+            </header>
+            <DocumentInspector
+              modal
+              item={sourcePreviewDocument}
+              folderTree={folderTree}
+              expandedStructureChunkId={expandedStructureChunkId}
+              deletingDocumentId={deletingDocumentId}
+              documentActionError={
+                documentActionError?.documentId === sourcePreviewDocument.document.id
+                  ? documentActionError.message
+                  : null
+              }
+              frameName={SOURCE_PREVIEW_FRAME_NAME}
+              onMoveDocument={handleMoveDocument}
+              onDeleteDocument={handleDeleteDocument}
+              onExpandStructure={setExpandedStructureChunkId}
+            />
+          </section>
+        </div>
+      ) : null}
 
       {view === 'chat' ? (
         <aside className="source-panel">

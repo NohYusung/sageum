@@ -241,6 +241,7 @@ export function DocumentRagApp({
   const [selectedDocumentId, setSelectedDocumentId] = useState(
     () => initialDocuments[0]?.document.id ?? '',
   );
+  const [expandedStructureChunkId, setExpandedStructureChunkId] = useState<string | null>(null);
   const [activeSources, setActiveSources] = useState<SourceReference[]>([]);
   const [uploadMessage, setUploadMessage] = useState<string | null>(null);
   const [uploadBusy, setUploadBusy] = useState(false);
@@ -1015,23 +1016,37 @@ export function DocumentRagApp({
                         <span>선택하면 원문 위치로 이동합니다</span>
                       </div>
                       <div className="structure-list">
-                        {selectedDocument.chunks.map((chunk) => (
-                          <a
-                            href={documentPreviewUrl(selectedDocument.document.id, chunk)}
-                            key={chunk.id}
-                            target={DOCUMENT_PREVIEW_FRAME_NAME}
-                          >
-                            <span>{chunk.ordinal + 1}</span>
-                            <p>
-                              <strong>{chunk.headingPath.join(' › ') || '본문'}</strong>
-                              <small>
-                                {[chunkLocation(chunk.location), `${chunk.wordCount} words`]
-                                  .filter(Boolean)
-                                  .join(' · ')}
-                              </small>
-                            </p>
-                          </a>
-                        ))}
+                        {selectedDocument.chunks.map((chunk) => {
+                          const expanded = expandedStructureChunkId === chunk.id;
+                          const snippetId = `structure-snippet-${chunk.ordinal}`;
+                          return (
+                            <a
+                              aria-controls={snippetId}
+                              aria-expanded={expanded}
+                              href={documentPreviewUrl(selectedDocument.document.id, chunk)}
+                              key={chunk.id}
+                              onClick={() => setExpandedStructureChunkId(chunk.id)}
+                              target={DOCUMENT_PREVIEW_FRAME_NAME}
+                            >
+                              <span>{chunk.ordinal + 1}</span>
+                              <div className="structure-list-content">
+                                <p>
+                                  <strong>{chunk.headingPath.join(' › ') || '본문'}</strong>
+                                  <small>
+                                    {[chunkLocation(chunk.location), `${chunk.wordCount} words`]
+                                      .filter(Boolean)
+                                      .join(' · ')}
+                                  </small>
+                                </p>
+                                {expanded ? (
+                                  <p className="structure-snippet" id={snippetId}>
+                                    {chunk.text}
+                                  </p>
+                                ) : null}
+                              </div>
+                            </a>
+                          );
+                        })}
                         {!selectedDocument.chunks.length ? (
                           <p className="structure-list-empty">구조화된 본문 위치가 없습니다.</p>
                         ) : null}

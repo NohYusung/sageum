@@ -1295,14 +1295,12 @@ svg {
 }
 
 .source-list p {
-  display: -webkit-box;
   margin: 10px 0 0;
-  overflow: hidden;
   color: var(--ink-soft);
   font-size: 10px;
   line-height: 1.55;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 4;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 .source-empty {
@@ -2150,7 +2148,7 @@ svg {
 .structure-list > a {
   display: grid;
   grid-template-columns: 24px minmax(0, 1fr);
-  align-items: center;
+  align-items: start;
   gap: 9px;
   padding: 9px;
   border: 1px solid var(--line);
@@ -2170,6 +2168,11 @@ svg {
   transform: translateX(2px);
 }
 
+.structure-list > a[aria-expanded='true'] {
+  border-color: #afc4b8;
+  background: var(--sage-pale);
+}
+
 .structure-list > a > span {
   display: grid;
   width: 24px;
@@ -2180,6 +2183,10 @@ svg {
   color: var(--sage-dark);
   font-family: var(--mono);
   font-size: 8px;
+}
+
+.structure-list-content {
+  min-width: 0;
 }
 
 .structure-list-empty {
@@ -2210,6 +2217,17 @@ svg {
   margin-top: 2px;
   color: var(--faint);
   font-size: 8px;
+}
+
+.structure-list .structure-snippet {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  color: var(--ink-soft);
+  font-size: 9px;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 .upload-content {

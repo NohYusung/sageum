@@ -27,6 +27,7 @@ async function main() {
     blockEnd: 0,
     focusBlock: 0,
     location: {},
+    sourceSpans: [],
   };
   const distractorChunks: DocumentChunk[] = [
     {

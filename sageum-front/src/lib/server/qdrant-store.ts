@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
 import { QdrantClient } from '@qdrant/js-client-rest';
 import { getProviderConfiguration, requireServerEnvironment } from './env';
-import type { DocumentChunk } from '@/lib/rag/types';
+import { parseDocumentSourceSpans } from '@/lib/rag/source-spans';
+import type { DocumentChunk, DocumentSourceSpan } from '@/lib/rag/types';
 
 export type InferenceChunk = {
   chunk: DocumentChunk;
@@ -26,6 +27,7 @@ export type VectorSearchResult = {
   sheet?: string;
   cellRange?: string;
   imageIndex?: number;
+  sourceSpans: DocumentSourceSpan[];
 };
 
 export type VectorSearchOptions = {
@@ -222,6 +224,7 @@ export class QdrantVectorStore {
                 sheet: chunk.location.sheet,
                 cell_range: chunk.location.cellRange,
                 image_index: chunk.location.imageIndex,
+                source_spans: chunk.sourceSpans,
               },
             };
           }),
@@ -294,6 +297,7 @@ export class QdrantVectorStore {
           'sheet',
           'cell_range',
           'image_index',
+          'source_spans',
         ],
       });
     } catch (error) {
@@ -322,6 +326,7 @@ export class QdrantVectorStore {
         sheet: typeof payload?.sheet === 'string' ? payload.sheet : undefined,
         cellRange: typeof payload?.cell_range === 'string' ? payload.cell_range : undefined,
         imageIndex: typeof payload?.image_index === 'number' ? payload.image_index : undefined,
+        sourceSpans: parseDocumentSourceSpans(payload?.source_spans),
       };
     });
   }

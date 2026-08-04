@@ -80,6 +80,61 @@ test('Markdown과 HTML 미리보기에 구조 블록 위치를 표시한다', as
   assert.match(html, /id="block-1"/u);
 });
 
+test('청크 원본 범위를 미리보기 블록과 텍스트에 강조한다', async () => {
+  const markdownSource = '# 운영 정책\n\n첫 번째 본문 내용\n\n두 번째 본문';
+  const markdown = await renderDocumentPreview(
+    new TextEncoder().encode(markdownSource),
+    {
+      name: 'policy.md',
+      mimeType: 'text/markdown',
+      sizeBytes: Buffer.byteLength(markdownSource),
+    },
+    {
+      sourceSpans: [{
+        blockId: 'block_000001',
+        blockIndex: 1,
+        startOffset: 0,
+        endOffset: 7,
+        startWord: 0,
+        endWord: 2,
+      }],
+    },
+  );
+  const html = sanitizeSandboxDocument(
+    '<html><body><p>첫 번째 본문 내용</p><p>다른 내용</p></body></html>',
+    {
+      annotateBlocks: true,
+      highlight: {
+        sourceSpans: [{
+          blockId: 'block_000000',
+          blockIndex: 0,
+          startOffset: 0,
+          endOffset: 7,
+          startWord: 0,
+          endWord: 3,
+        }],
+      },
+    },
+  );
+
+  assert.match(markdown, /id="block-1" class="preview-block chunk-range-block"/u);
+  assert.match(markdown, /<mark class="chunk-range">첫 번째 본문<\/mark>/u);
+  assert.match(html, /id="block-0" class="preview-block chunk-range-block"/u);
+  assert.match(html, /<mark class="chunk-range">첫<\/mark> <mark class="chunk-range">번째<\/mark> <mark class="chunk-range">본문<\/mark>/u);
+});
+
+test('기존 청크의 블록 범위도 미리보기에서 강조한다', async () => {
+  const bytes = await fixture('sample-workbook.xlsx');
+  const html = await renderDocumentPreview(bytes, {
+    name: 'sample-workbook.xlsx',
+    mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    sizeBytes: bytes.byteLength,
+  }, { blockStart: 0, blockEnd: 0 });
+
+  assert.match(html, /id="block-0" class="preview-block chunk-range-block"/u);
+  assert.match(html, /<tr class="chunk-range-block">/u);
+});
+
 test('미리보기 화면과 원본 다운로드 경로를 분리한다', () => {
   const documentId = '123e4567-e89b-42d3-a456-426614174000';
   const page = buildDocumentPreviewPage({

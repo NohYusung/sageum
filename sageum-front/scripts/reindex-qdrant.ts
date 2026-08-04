@@ -1,4 +1,5 @@
 import type { DocumentChunk } from '../src/lib/rag/types';
+import { sourceSpansFromMetadata } from '../src/lib/rag/source-spans';
 import type { Json, Tables } from '../src/lib/supabase/database.types';
 import { getProviderConfiguration } from '../src/lib/server/env';
 import { getQdrantVectorStore } from '../src/lib/server/qdrant-store';
@@ -33,6 +34,7 @@ function toDocumentChunk(row: Tables<'document_chunks'>): DocumentChunk {
       startOffset: row.start_offset ?? undefined,
       endOffset: row.end_offset ?? undefined,
     },
+    sourceSpans: sourceSpansFromMetadata(row.metadata),
   };
 }
 

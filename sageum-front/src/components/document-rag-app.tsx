@@ -166,6 +166,20 @@ function sourceLocation(source: SourceReference) {
   return null;
 }
 
+function chunkRangeLabel(chunk: DocumentChunk) {
+  const first = chunk.sourceSpans[0];
+  const last = chunk.sourceSpans.at(-1);
+  if (!first || !last) {
+    return chunk.blockStart === chunk.blockEnd
+      ? `범위 · 블록 ${chunk.blockStart + 1}`
+      : `범위 · 블록 ${chunk.blockStart + 1}–${chunk.blockEnd + 1}`;
+  }
+  if (first.blockIndex === last.blockIndex) {
+    return `범위 · 블록 ${first.blockIndex + 1}:${first.startOffset}–${last.endOffset}`;
+  }
+  return `범위 · 블록 ${first.blockIndex + 1}:${first.startOffset} → ${last.blockIndex + 1}:${last.endOffset}`;
+}
+
 async function searchRepository(
   documents: IndexedDocument[],
   query: string,
@@ -210,11 +224,12 @@ function fileIcon(type: IndexedDocument['document']['sourceType']) {
 }
 
 function documentPreviewUrl(documentId: string, chunk?: DocumentChunk) {
-  const base = `/documents/${encodeURIComponent(documentId)}/preview?embedded=1`;
+  const params = new URLSearchParams({ embedded: '1' });
+  if (chunk) params.set('chunk', chunk.id);
+  if (chunk?.location.page !== undefined) params.set('page', String(chunk.location.page));
+  const base = `/documents/${encodeURIComponent(documentId)}/preview?${params.toString()}`;
   if (!chunk) return base;
-  if (chunk.location.page !== undefined) {
-    return `${base}&page=${encodeURIComponent(String(chunk.location.page))}`;
-  }
+  if (chunk.location.page !== undefined) return base;
   return `${base}#block-${chunk.focusBlock}`;
 }
 
@@ -300,6 +315,9 @@ export function DocumentRagApp({
     () => filteredDocuments.find(({ document }) => document.id === selectedDocumentId)
       ?? filteredDocuments[0],
     [filteredDocuments, selectedDocumentId],
+  );
+  const selectedPreviewChunk = selectedDocument?.chunks.find(
+    (chunk) => chunk.id === expandedStructureChunkId,
   );
   const SelectedDocumentIcon = selectedDocument ? fileIcon(selectedDocument.document.sourceType) : FileText;
 
@@ -556,6 +574,7 @@ export function DocumentRagApp({
 
   function openSource(source: SourceReference) {
     setSelectedDocumentId(source.documentId);
+    setExpandedStructureChunkId(source.chunkId);
     const sourceDocument = documents.find(({ document }) => document.id === source.documentId);
     setSelectedFolderId(sourceDocument?.document.folderId ?? null);
     setView('documents');
@@ -998,9 +1017,12 @@ export function DocumentRagApp({
                     ) : (
                       <div className="document-preview-frame">
                         <iframe
-                          key={selectedDocument.document.id}
+                          key={`${selectedDocument.document.id}:${selectedPreviewChunk?.id ?? 'default'}`}
                           name={DOCUMENT_PREVIEW_FRAME_NAME}
-                          src={documentPreviewUrl(selectedDocument.document.id)}
+                          src={documentPreviewUrl(
+                            selectedDocument.document.id,
+                            selectedPreviewChunk,
+                          )}
                           title={`${selectedDocument.document.title} 원본 미리보기`}
                           sandbox={selectedDocument.document.sourceType === 'pdf' ? undefined : ''}
                           referrerPolicy="no-referrer"
@@ -1037,6 +1059,7 @@ export function DocumentRagApp({
                                       .filter(Boolean)
                                       .join(' · ')}
                                   </small>
+                                  <small className="structure-range">{chunkRangeLabel(chunk)}</small>
                                 </p>
                                 {expanded ? (
                                   <p className="structure-snippet" id={snippetId}>

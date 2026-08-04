@@ -56,6 +56,7 @@ function fakeClient(vectorSize = 3) {
             heading_path: ['신청 기준'],
             page: 2,
             cell_range: 'A1:B2',
+            source_spans: CHUNK.sourceSpans,
           },
         }],
       };
@@ -81,6 +82,16 @@ const CHUNK: DocumentChunk = {
   blockEnd: 0,
   focusBlock: 0,
   location: { page: 2, cellRange: 'A1:B2' },
+  sourceSpans: [{
+    blockId: 'block_000000',
+    blockIndex: 0,
+    startOffset: 0,
+    endOffset: 17,
+    startWord: 0,
+    endWord: 4,
+    page: 2,
+    cellRange: 'A1:B2',
+  }],
 };
 
 test('Collection과 필터 payload index를 벡터 저장 전에 준비한다', async () => {
@@ -131,6 +142,7 @@ test('청크 위치를 payload로 저장하고 소유자·문서 필터로 검�
   assert.equal(upsert.points[0].payload.page, 2);
   assert.equal(upsert.points[0].payload.cell_range, 'A1:B2');
   assert.equal(upsert.points[0].payload.focus_block, 0);
+  assert.deepEqual(upsert.points[0].payload.source_spans, CHUNK.sourceSpans);
   assert.equal(
     upsert.points[0].vector.dense.model,
     'intfloat/multilingual-e5-small',
@@ -176,6 +188,9 @@ test('청크 위치를 payload로 저장하고 소유자·문서 필터로 검�
   assert.equal(query.query.fusion, 'rrf');
   assert.equal(results[0].documentTitle, '운영 가이드');
   assert.equal(results[0].page, 2);
+  assert.equal(results[0].sourceSpans[0].blockId, CHUNK.sourceSpans[0].blockId);
+  assert.equal(results[0].sourceSpans[0].startOffset, CHUNK.sourceSpans[0].startOffset);
+  assert.equal(results[0].sourceSpans[0].endOffset, CHUNK.sourceSpans[0].endOffset);
 });
 
 test('버전 삭제에도 owner_id 필터를 항상 포함한다', async () => {

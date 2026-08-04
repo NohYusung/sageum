@@ -1,4 +1,4 @@
-import type { DocumentChunk, NormalizedDocument } from './types';
+import type { DocumentChunk, DocumentSourceSpan, NormalizedDocument } from './types';
 
 export type IndexedDocument = {
   document: NormalizedDocument;
@@ -19,6 +19,7 @@ export type SourceReference = {
   sheet?: string;
   cellRange?: string;
   imageIndex?: number;
+  sourceSpans: DocumentSourceSpan[];
 };
 
 function queryTerms(query: string) {
@@ -62,6 +63,7 @@ export function searchDocuments(
         sheet: chunk.location.sheet,
         cellRange: chunk.location.cellRange,
         imageIndex: chunk.location.imageIndex,
+        sourceSpans: chunk.sourceSpans,
       }];
     });
   });

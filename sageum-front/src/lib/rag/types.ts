@@ -10,6 +10,27 @@ export type DocumentLocation = {
   endOffset?: number;
 };
 
+export type DocumentBoundingBox = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+export type DocumentSourceSpan = {
+  blockId: string;
+  blockIndex: number;
+  startOffset: number;
+  endOffset: number;
+  startWord: number;
+  endWord: number;
+  page?: number;
+  sheet?: string;
+  cellRange?: string;
+  imageIndex?: number;
+  boxes?: DocumentBoundingBox[];
+};
+
 export type NormalizedBlock = {
   id: string;
   kind: 'heading' | 'paragraph' | 'list' | 'table' | 'image';
@@ -43,6 +64,7 @@ export type DocumentChunk = {
   blockEnd: number;
   focusBlock: number;
   location: DocumentLocation;
+  sourceSpans: DocumentSourceSpan[];
 };
 
 export type ChunkingOptions = {

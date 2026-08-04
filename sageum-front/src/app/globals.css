@@ -2206,6 +2206,13 @@ svg {
   margin: 0;
 }
 
+.structure-list .structure-range {
+  margin-top: 4px;
+  color: var(--sage);
+  font-family: var(--mono);
+  font-weight: 700;
+}
+
 .structure-list strong {
   overflow: hidden;
   font-size: 10px;

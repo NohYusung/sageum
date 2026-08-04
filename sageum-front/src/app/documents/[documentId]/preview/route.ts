@@ -6,11 +6,14 @@ import {
   buildDocumentPreviewPage,
   renderDocumentPreview,
   type DocumentPreview,
+  type PreviewHighlight,
 } from '@/lib/server/document-preview';
+import { metadataBlockRange, sourceSpansFromMetadata } from '@/lib/rag/source-spans';
 
 export const runtime = 'nodejs';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+const CHUNK_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}:\d{6}$/iu;
 
 function previewError(message: string, status: number) {
   return new Response(
@@ -39,9 +42,36 @@ export async function GET(
     return previewError('올바른 문서 식별자가 필요합니다.', 400);
   }
 
+  const requestUrl = new URL(request.url);
+  const requestedChunkId = requestUrl.searchParams.get('chunk');
+  if (requestedChunkId && !CHUNK_ID_PATTERN.test(requestedChunkId)) {
+    return previewError('올바른 청크 식별자가 필요합니다.', 400);
+  }
+
   let original;
+  let highlight: PreviewHighlight | undefined;
   try {
-    original = await findOwnedOriginalDocument(context.supabase, context.ownerId, documentId);
+    const [foundOriginal, chunkResult] = await Promise.all([
+      findOwnedOriginalDocument(context.supabase, context.ownerId, documentId),
+      requestedChunkId
+        ? context.supabase
+          .from('document_chunks')
+          .select('version_id,metadata')
+          .eq('id', requestedChunkId)
+          .eq('document_id', documentId)
+          .eq('owner_id', context.ownerId)
+          .maybeSingle()
+        : Promise.resolve({ data: null, error: null }),
+    ]);
+    original = foundOriginal;
+    if (chunkResult.error) throw new Error('Preview chunk lookup failed', { cause: chunkResult.error });
+    if (requestedChunkId && !chunkResult.data) return previewError('문서 청크를 찾을 수 없습니다.', 404);
+    if (chunkResult.data && original && chunkResult.data.version_id === original.versionId) {
+      highlight = {
+        sourceSpans: sourceSpansFromMetadata(chunkResult.data.metadata),
+        ...metadataBlockRange(chunkResult.data.metadata),
+      };
+    }
   } catch (error) {
     console.error('Failed to find document for preview', error);
     return previewError('원본 문서 정보를 조회하지 못했습니다.', 500);
@@ -74,7 +104,7 @@ export async function GET(
           name: original.originalFilename,
           mimeType: original.mimeType,
           sizeBytes: original.sizeBytes,
-        }),
+        }, highlight),
       };
     }
   } catch (error) {
@@ -82,7 +112,6 @@ export async function GET(
     return previewError('이 문서는 브라우저 미리보기로 변환하지 못했습니다. 원본 다운로드를 이용해 주세요.', 422);
   }
 
-  const requestUrl = new URL(request.url);
   if (requestUrl.searchParams.get('embedded') === '1') {
     if (preview.kind === 'pdf') {
       const requestedPage = Number(requestUrl.searchParams.get('page'));

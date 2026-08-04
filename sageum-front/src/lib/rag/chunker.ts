@@ -2,17 +2,21 @@ import {
   DEFAULT_CHUNKING_OPTIONS,
   type ChunkingOptions,
   type DocumentChunk,
+  type DocumentSourceSpan,
   type NormalizedDocument,
 } from './types';
 
 type WordToken = {
   value: string;
   blockIndex: number;
+  startOffset: number;
+  endOffset: number;
+  wordIndex: number;
   boundaryAfter: boolean;
 };
 
 const SENTENCE_END = /[.!?。！？][\]})"'’”]*$/u;
-export const CHUNKER_VERSION = 'word-heading-v2';
+export const CHUNKER_VERSION = 'word-heading-source-spans-v3';
 
 function segmentKey(document: NormalizedDocument, blockIndex: number) {
   const block = document.blocks[blockIndex];
@@ -38,17 +42,48 @@ function tokenizeSegments(document: NormalizedDocument): WordToken[][] {
       activeKey = key;
     }
     const tokens = segments.at(-1)!;
-    const words = block.text.trim().split(/\s+/u).filter(Boolean);
-    words.forEach((value, wordIndex) => {
+    const words = [...block.text.matchAll(/\S+/gu)];
+    words.forEach((match, wordIndex) => {
+      const value = match[0];
+      const startOffset = match.index;
       tokens.push({
         value,
         blockIndex,
+        startOffset,
+        endOffset: startOffset + value.length,
+        wordIndex,
         boundaryAfter: wordIndex === words.length - 1 || SENTENCE_END.test(value),
       });
     });
   });
 
   return segments.filter((tokens) => tokens.length);
+}
+
+function sourceSpans(document: NormalizedDocument, tokens: WordToken[]) {
+  const spans: DocumentSourceSpan[] = [];
+  tokens.forEach((token) => {
+    const block = document.blocks[token.blockIndex];
+    const previous = spans.at(-1);
+    if (previous?.blockIndex === token.blockIndex) {
+      previous.endOffset = token.endOffset;
+      previous.endWord = token.wordIndex + 1;
+      return;
+    }
+    spans.push({
+      blockId: block.id,
+      blockIndex: token.blockIndex,
+      startOffset: token.startOffset,
+      endOffset: token.endOffset,
+      startWord: token.wordIndex,
+      endWord: token.wordIndex + 1,
+      page: block.location.page,
+      sheet: block.location.sheet,
+      cellRange: block.location.cellRange,
+      imageIndex: block.location.imageIndex,
+    });
+  });
+  return spans;
 }
 
 function validateOptions(options: ChunkingOptions) {
@@ -106,6 +141,9 @@ export function chunkDocument(
       const lastBlockIndex = window[window.length - 1].blockIndex;
       const firstBlock = document.blocks[firstBlockIndex];
       const lastBlock = document.blocks[lastBlockIndex];
+      const spans = sourceSpans(document, window);
+      const firstSpan = spans[0];
+      const lastSpan = spans.at(-1)!;
       const ordinal = chunks.length;
 
       chunks.push({
@@ -125,9 +163,14 @@ export function chunkDocument(
           cellRange: firstBlock.location.cellRange ?? lastBlock.location.cellRange,
           imageIndex: firstBlock.location.imageIndex ?? lastBlock.location.imageIndex,
           previewBlock: firstBlock.location.previewBlock ?? lastBlock.location.previewBlock,
-          startOffset: firstBlock.location.startOffset,
-          endOffset: lastBlock.location.endOffset,
+          startOffset: firstBlock.location.startOffset === undefined
+            ? firstSpan.startOffset
+            : firstBlock.location.startOffset + firstSpan.startOffset,
+          endOffset: lastBlock.location.startOffset === undefined
+            ? lastSpan.endOffset
+            : lastBlock.location.startOffset + lastSpan.endOffset,
         },
+        sourceSpans: spans,
       });
 
       if (end >= tokens.length) break;

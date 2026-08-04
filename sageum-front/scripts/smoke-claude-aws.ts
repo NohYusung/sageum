@@ -20,6 +20,7 @@ async function main() {
       snippet: '직원은 일주일에 이틀까지 자택에서 근무할 수 있습니다.',
       score: 0.99,
       page: 2,
+      sourceSpans: [],
     }],
   );
 

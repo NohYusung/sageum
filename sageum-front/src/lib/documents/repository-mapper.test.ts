@@ -49,7 +49,18 @@ const chunk: StoredDocumentChunk = {
   cell_range: null,
   start_offset: 0,
   end_offset: 20,
-  metadata: { blockStart: 1, blockEnd: 2 },
+  metadata: {
+    blockStart: 1,
+    blockEnd: 2,
+    sourceSpans: [{
+      blockId: 'block_000001',
+      blockIndex: 1,
+      startOffset: 3,
+      endOffset: 20,
+      startWord: 1,
+      endWord: 4,
+    }],
+  },
   created_at: '2026-08-02T00:02:00.000Z',
 };
 
@@ -65,6 +76,8 @@ test('Supabase 문서 행을 클라이언트 검색 모델로 복원한다', () 
   assert.equal(indexed.chunks[0].blockStart, 1);
   assert.equal(indexed.chunks[0].focusBlock, 2);
   assert.equal(indexed.chunks[0].location.startOffset, 0);
+  assert.equal(indexed.chunks[0].sourceSpans[0].blockId, 'block_000001');
+  assert.equal(indexed.chunks[0].sourceSpans[0].startOffset, 3);
 });
 
 test('새 청크의 명시적인 이동 블록을 우선한다', () => {

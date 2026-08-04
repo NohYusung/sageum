@@ -182,6 +182,7 @@ export async function POST(
         focusBlock: chunk.focusBlock,
         imageIndex: chunk.location.imageIndex ?? null,
         previewBlock: chunk.location.previewBlock ?? null,
+        sourceSpans: chunk.sourceSpans,
       },
     }));
     const { error: chunksError } = await context.supabase

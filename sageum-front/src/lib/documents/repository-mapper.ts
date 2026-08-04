@@ -1,4 +1,5 @@
 import type { IndexedDocument } from '@/lib/rag/local-search';
+import { sourceSpansFromMetadata } from '@/lib/rag/source-spans';
 import type { DocumentSourceType } from '@/lib/rag/types';
 import type { Json, Tables } from '@/lib/supabase/database.types';
 
@@ -80,6 +81,7 @@ export function mapStoredDocument(
           startOffset: chunk.start_offset ?? undefined,
           endOffset: chunk.end_offset ?? undefined,
         },
+        sourceSpans: sourceSpansFromMetadata(chunk.metadata),
       };
     }),
     status: document.deletion_status === 'deleting'

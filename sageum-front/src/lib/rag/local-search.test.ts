@@ -27,6 +27,7 @@ const DOCUMENTS: IndexedDocument[] = [
         blockEnd: 0,
         focusBlock: 0,
         location: {},
+        sourceSpans: [],
       },
       {
         id: 'chunk-2',
@@ -40,6 +41,7 @@ const DOCUMENTS: IndexedDocument[] = [
         blockEnd: 1,
         focusBlock: 1,
         location: {},
+        sourceSpans: [],
       },
     ],
     status: 'ready',

@@ -35,7 +35,8 @@ function makeDocument(wordCount: number): NormalizedDocument {
 }
 
 test('단어 수 기준으로 청크를 만들고 최대 크기를 지킨다', () => {
-  const chunks = chunkDocument(makeDocument(920), {
+  const document = makeDocument(920);
+  const chunks = chunkDocument(document, {
     targetWords: 320,
     maxWords: 380,
     overlapWords: 40,
@@ -45,6 +46,16 @@ test('단어 수 기준으로 청크를 만들고 최대 크기를 지킨다', (
   assert.ok(chunks.every((chunk) => chunk.wordCount <= 380));
   assert.equal(chunks[0].id, 'version-1:000000');
   assert.equal(chunks[1].ordinal, 1);
+  assert.equal(chunks[0].sourceSpans[0].blockId, 'b1');
+  assert.equal(chunks[0].sourceSpans[0].startWord, 0);
+  assert.equal(chunks[1].sourceSpans[0].startWord, 340);
+  assert.equal(
+    document.blocks[chunks[0].sourceSpans[0].blockIndex].text.slice(
+      chunks[0].sourceSpans[0].startOffset,
+      chunks[0].sourceSpans[0].endOffset,
+    ),
+    chunks[0].text,
+  );
 });
 
 test('인접 청크에 지정한 단어 중첩을 적용한다', () => {
@@ -57,6 +68,62 @@ test('인접 청크에 지정한 단어 중첩을 적용한다', () => {
   const firstTail = chunks[0].text.split(/\s+/u).slice(-20);
   const secondHead = chunks[1].text.split(/\s+/u).slice(0, 20);
   assert.deepEqual(secondHead, firstTail);
+  assert.equal(chunks[1].sourceSpans[0].startWord, 100);
+});
+
+test('청크가 여러 블록을 지나면 블록별 원본 범위를 보존한다', () => {
+  const document = makeDocument(0);
+  document.blocks = [
+    {
+      id: 'first-block',
+      kind: 'paragraph',
+      text: '하나 둘',
+      headingPath: ['같은 절'],
+      location: {},
+    },
+    {
+      id: 'second-block',
+      kind: 'paragraph',
+      text: '셋 넷 다섯 여섯',
+      headingPath: ['같은 절'],
+      location: {},
+    },
+  ];
+
+  const chunks = chunkDocument(document, {
+    targetWords: 4,
+    maxWords: 4,
+    overlapWords: 1,
+  });
+
+  assert.deepEqual(chunks[0].sourceSpans, [
+    {
+      blockId: 'first-block',
+      blockIndex: 0,
+      startOffset: 0,
+      endOffset: 4,
+      startWord: 0,
+      endWord: 2,
+      page: undefined,
+      sheet: undefined,
+      cellRange: undefined,
+      imageIndex: undefined,
+    },
+    {
+      blockId: 'second-block',
+      blockIndex: 1,
+      startOffset: 0,
+      endOffset: 3,
+      startWord: 0,
+      endWord: 2,
+      page: undefined,
+      sheet: undefined,
+      cellRange: undefined,
+      imageIndex: undefined,
+    },
+  ]);
+  assert.equal(chunks[1].sourceSpans[0].blockId, 'second-block');
+  assert.equal(chunks[1].sourceSpans[0].startWord, 1);
 });
 
 test('빈 문서는 청크를 만들지 않는다', () => {

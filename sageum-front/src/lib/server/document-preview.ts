@@ -1,9 +1,10 @@
 import { load } from 'cheerio';
+import type { AnyNode, Text } from 'domhandler';
 import mammoth from 'mammoth';
 import readXlsxFile from 'read-excel-file/node';
 import { validateDocumentMetadata } from '@/lib/documents/validation';
 import { parseTextDocumentSource } from '@/lib/rag/parser';
-import type { NormalizedBlock } from '@/lib/rag/types';
+import type { DocumentSourceSpan, NormalizedBlock } from '@/lib/rag/types';
 
 const MAX_PREVIEW_ROWS = 500;
 const MAX_PREVIEW_COLUMNS = 50;
@@ -12,6 +13,12 @@ type PreviewInput = {
   name: string;
   mimeType: string;
   sizeBytes: number;
+};
+
+export type PreviewHighlight = {
+  sourceSpans?: DocumentSourceSpan[];
+  blockStart?: number;
+  blockEnd?: number;
 };
 
 export type DocumentPreview =
@@ -40,15 +47,58 @@ function lineBreaks(value: string) {
   return escapeHtml(value).replace(/\n/gu, '<br>');
 }
 
-function blockAnchor(blockIndex: number) {
-  return ` id="block-${blockIndex}" class="preview-block"`;
+function highlightedBlockIndexes(highlight?: PreviewHighlight) {
+  const indexes = new Set(highlight?.sourceSpans?.map((span) => span.blockIndex) ?? []);
+  if (!indexes.size && highlight?.blockStart !== undefined) {
+    const end = highlight.blockEnd ?? highlight.blockStart;
+    for (let index = highlight.blockStart; index <= end; index += 1) indexes.add(index);
+  }
+  return indexes;
 }
 
-function renderBlock(block: NormalizedBlock, blockIndex: number) {
-  const anchor = blockAnchor(blockIndex);
+function blockAnchor(blockIndex: number, highlighted = false) {
+  return ` id="block-${blockIndex}" class="preview-block${highlighted ? ' chunk-range-block' : ''}"`;
+}
+
+function blockSourceSpans(highlight: PreviewHighlight | undefined, blockIndex: number) {
+  return highlight?.sourceSpans?.filter((span) => span.blockIndex === blockIndex) ?? [];
+}
+
+function highlightedText(value: string, spans: DocumentSourceSpan[]) {
+  if (!spans.length) return escapeHtml(value);
+  const ranges = spans
+    .map((span) => ({
+      start: Math.max(0, Math.min(value.length, span.startOffset)),
+      end: Math.max(0, Math.min(value.length, span.endOffset)),
+    }))
+    .filter(({ start, end }) => end > start)
+    .toSorted((left, right) => left.start - right.start);
+  if (!ranges.length) return escapeHtml(value);
+  let cursor = 0;
+  let html = '';
+  ranges.forEach(({ start, end }) => {
+    if (start > cursor) html += escapeHtml(value.slice(cursor, start));
+    const rangeStart = Math.max(cursor, start);
+    if (end > rangeStart) {
+      html += `<mark class="chunk-range">${escapeHtml(value.slice(rangeStart, end))}</mark>`;
+    }
+    cursor = Math.max(cursor, end);
+  });
+  if (cursor < value.length) html += escapeHtml(value.slice(cursor));
+  return html;
+}
+
+function renderBlock(
+  block: NormalizedBlock,
+  blockIndex: number,
+  highlight?: PreviewHighlight,
+) {
+  const spans = blockSourceSpans(highlight, blockIndex);
+  const highlighted = highlightedBlockIndexes(highlight).has(blockIndex);
+  const anchor = blockAnchor(blockIndex, highlighted);
   if (block.kind === 'heading') {
     const level = Math.min(Math.max(block.headingPath.length, 1), 6);
-    return `<h${level}${anchor}>${escapeHtml(block.text)}</h${level}>`;
+    return `<h${level}${anchor}>${highlightedText(block.text, spans)}</h${level}>`;
   }
   if (block.kind === 'list') {
     const lines = block.text.split('\n').filter(Boolean);
@@ -61,9 +111,14 @@ function renderBlock(block: NormalizedBlock, blockIndex: number) {
   }
   if (block.kind === 'table') {
     const rows = block.text.split('\n').map((row) => row.split('|').map((cell) => cell.trim()));
-    return renderTable(rows, new Map([[0, blockIndex]]));
+    return renderTable(
+      rows,
+      new Map([[0, blockIndex]]),
+      new Map(rows.map((_row, rowIndex) => [rowIndex, blockIndex])),
+      highlightedBlockIndexes(highlight),
+    );
   }
-  return `<p${anchor}>${lineBreaks(block.text)}</p>`;
+  return `<p${anchor}>${highlightedText(block.text, spans).replace(/\n/gu, '<br>')}</p>`;
 }
 
 function sandboxStyles() {
@@ -84,6 +139,10 @@ function sandboxStyles() {
     [id^="block-"] { scroll-margin-top: 24px; }
     [id^="block-"]:target { outline: 3px solid rgba(167, 111, 42, .45); outline-offset: 5px; background: #fff5d8; }
     tr[id^="block-"]:target > th, tr[id^="block-"]:target > td { background: #fff0bd; }
+    .chunk-range-block { outline: 3px solid rgba(167, 111, 42, .45); outline-offset: 4px; }
+    .chunk-range-block:is(ul, ol, table, tr) { background: #fff7df; }
+    tr.chunk-range-block > th, tr.chunk-range-block > td { background: #fff0bd; }
+    mark.chunk-range { border-radius: 3px; background: #ffe49a; color: inherit; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
     .sheet { margin-bottom: 52px; overflow-x: auto; }
     .sheet h2 { position: sticky; left: 0; margin-top: 0; }
     .preview-note { margin: 16px 0 28px; padding: 11px 13px; border-radius: 8px; background: #f7ead8; color: #69451c; font-size: 12px; }
@@ -129,12 +188,72 @@ function annotatePreviewBlocks(
   });
 }
 
+function collectTextNodes(node: AnyNode, result: Text[]) {
+  if (node.type === 'text') {
+    result.push(node as Text);
+    return;
+  }
+  if ('children' in node) node.children.forEach((child) => collectTextNodes(child, result));
+}
+
+function highlightElementWords(
+  $: ReturnType<typeof load>,
+  blockIndex: number,
+  spans: DocumentSourceSpan[],
+) {
+  const selection = $(`#block-${blockIndex}`);
+  if (!selection.length) return;
+  selection.addClass('chunk-range-block');
+  const tagName = selection.prop('tagName')?.toLocaleLowerCase('en-US') ?? '';
+  if (['table', 'ul', 'ol'].includes(tagName) || !spans.length) return;
+
+  const textNodes: Text[] = [];
+  const root = selection.get(0);
+  if (root) collectTextNodes(root, textNodes);
+  let wordIndex = 0;
+  textNodes.forEach((node) => {
+    const value = node.data;
+    let cursor = 0;
+    let changed = false;
+    let html = '';
+    for (const match of value.matchAll(/\S+/gu)) {
+      const start = match.index;
+      const end = start + match[0].length;
+      const highlighted = spans.some(
+        (span) => wordIndex >= span.startWord && wordIndex < span.endWord,
+      );
+      if (highlighted) {
+        html += escapeHtml(value.slice(cursor, start));
+        html += `<mark class="chunk-range">${escapeHtml(match[0])}</mark>`;
+        cursor = end;
+        changed = true;
+      }
+      wordIndex += 1;
+    }
+    if (!changed) return;
+    html += escapeHtml(value.slice(cursor));
+    $(node).replaceWith(html);
+  });
+}
+
+function applyPreviewHighlight($: ReturnType<typeof load>, highlight?: PreviewHighlight) {
+  const indexes = highlightedBlockIndexes(highlight);
+  indexes.forEach((blockIndex) => {
+    highlightElementWords($, blockIndex, blockSourceSpans(highlight, blockIndex));
+  });
+}
+
 export function sanitizeSandboxDocument(
   source: string,
   {
     annotateBlocks = false,
     includeContainerBlocks = false,
-  }: { annotateBlocks?: boolean; includeContainerBlocks?: boolean } = {},
+    highlight,
+  }: {
+    annotateBlocks?: boolean;
+    includeContainerBlocks?: boolean;
+    highlight?: PreviewHighlight;
+  } = {},
 ) {
   const $ = load(source);
   $('script,iframe,object,embed,form,input,button,textarea,select,option,base,link,meta,foreignObject').remove();
@@ -164,6 +283,7 @@ export function sanitizeSandboxDocument(
   if (annotateBlocks) {
     annotatePreviewBlocks($, { includeContainers: includeContainerBlocks });
   }
+  applyPreviewHighlight($, highlight);
 
   $('html').attr('lang', 'ko');
   $('head').prepend(
@@ -172,12 +292,21 @@ export function sanitizeSandboxDocument(
   return $.html();
 }
 
-function renderTable(rows: string[][], rowAnchors = new Map<number, number>()) {
+function renderTable(
+  rows: string[][],
+  rowAnchors = new Map<number, number>(),
+  rowBlocks = new Map<number, number>(),
+  highlightedBlocks = new Set<number>(),
+) {
   if (!rows.length) return '<p>표시할 셀이 없습니다.</p>';
   const body = rows.map((row, rowIndex) => {
     const cellTag = rowIndex === 0 ? 'th' : 'td';
     const blockIndex = rowAnchors.get(rowIndex);
-    const anchor = blockIndex === undefined ? '' : blockAnchor(blockIndex);
+    const rowBlock = rowBlocks.get(rowIndex);
+    const highlighted = rowBlock !== undefined && highlightedBlocks.has(rowBlock);
+    const anchor = blockIndex === undefined
+      ? highlighted ? ' class="chunk-range-block"' : ''
+      : blockAnchor(blockIndex, highlighted);
     return `<tr${anchor}>${row.map((cell) => `<${cellTag}>${lineBreaks(cell)}</${cellTag}>`).join('')}</tr>`;
   }).join('');
   return `<table><tbody>${body}</tbody></table>`;
@@ -189,18 +318,24 @@ function cellText(value: unknown) {
   return String(value);
 }
 
-async function renderXlsx(bytes: Uint8Array) {
+async function renderXlsx(bytes: Uint8Array, highlight?: PreviewHighlight) {
   const sheets = await readXlsxFile(asBuffer(bytes));
+  const highlightedBlocks = highlightedBlockIndexes(highlight);
   let nextBlockIndex = 0;
   const sections = sheets.map((sheet) => {
     const rowAnchors = new Map<number, number>();
+    const rowBlocks = new Map<number, number>();
     let insideRegion = false;
+    let activeBlockIndex: number | null = null;
     sheet.data.forEach((row, rowIndex) => {
       const hasContent = row.some((cell) => cellText(cell).trim());
       if (hasContent && !insideRegion) {
-        rowAnchors.set(rowIndex, nextBlockIndex);
+        activeBlockIndex = nextBlockIndex;
+        rowAnchors.set(rowIndex, activeBlockIndex);
         nextBlockIndex += 1;
       }
+      if (hasContent && activeBlockIndex !== null) rowBlocks.set(rowIndex, activeBlockIndex);
+      if (!hasContent) activeBlockIndex = null;
       insideRegion = hasContent;
     });
     const rows = sheet.data
@@ -212,12 +347,12 @@ async function renderXlsx(bytes: Uint8Array) {
       truncated
         ? `<p class="preview-note">미리보기는 최대 ${MAX_PREVIEW_ROWS}행 × ${MAX_PREVIEW_COLUMNS}열까지 표시합니다. 전체 내용은 원본을 다운로드해 확인하세요.</p>`
         : ''
-    }${renderTable(rows, rowAnchors)}</section>`;
+    }${renderTable(rows, rowAnchors, rowBlocks, highlightedBlocks)}</section>`;
   });
   return sandboxDocument(sections.join('') || '<p>표시할 시트가 없습니다.</p>');
 }
 
-async function renderDocx(bytes: Uint8Array) {
+async function renderDocx(bytes: Uint8Array, highlight?: PreviewHighlight) {
   const result = await mammoth.convertToHtml(
     { buffer: asBuffer(bytes) },
     {
@@ -226,30 +361,34 @@ async function renderDocx(bytes: Uint8Array) {
       ignoreEmptyParagraphs: true,
     },
   );
-  return sanitizeSandboxDocument(result.value, { annotateBlocks: true });
+  return sanitizeSandboxDocument(result.value, { annotateBlocks: true, highlight });
 }
 
 export async function renderDocumentPreview(
   bytes: Uint8Array,
   input: PreviewInput,
+  highlight?: PreviewHighlight,
 ): Promise<string> {
   const metadata = validateDocumentMetadata(input);
   if (metadata.sourceType === 'pdf') {
     throw new Error('PDF preview requires a signed URL');
   }
-  if (metadata.sourceType === 'docx') return renderDocx(bytes);
-  if (metadata.sourceType === 'xlsx') return renderXlsx(bytes);
+  if (metadata.sourceType === 'docx') return renderDocx(bytes, highlight);
+  if (metadata.sourceType === 'xlsx') return renderXlsx(bytes, highlight);
 
   const source = new TextDecoder('utf-8').decode(bytes);
   if (metadata.sourceType === 'html') {
     return sanitizeSandboxDocument(source, {
       annotateBlocks: true,
       includeContainerBlocks: true,
+      highlight,
     });
   }
 
   const document = parseTextDocumentSource(source, input);
-  return sandboxDocument(document.blocks.map(renderBlock).join(''));
+  return sandboxDocument(document.blocks.map((block, index) =>
+    renderBlock(block, index, highlight),
+  ).join(''));
 }
 
 function previewPageStyles() {

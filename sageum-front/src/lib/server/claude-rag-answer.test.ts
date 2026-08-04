@@ -17,6 +17,7 @@ function source(chunkId: string, snippet = '재택근무는 일주일에 이틀�
     snippet,
     score: 0.9,
     page: 3,
+    sourceSpans: [],
   };
 }
 

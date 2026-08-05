@@ -1,4 +1,8 @@
-import type { ProcessDocumentResponse } from '@/lib/documents/contracts';
+import type {
+  DocumentProcessingStatus,
+  DocumentProcessingStatusResponse,
+  ProcessDocumentResponse,
+} from '@/lib/documents/contracts';
 import { DOCUMENT_BUCKET, DocumentValidationError } from '@/lib/documents/validation';
 import { CHUNKER_VERSION, chunkDocument } from '@/lib/rag/chunker';
 import type { IndexedDocument } from '@/lib/rag/local-search';
@@ -27,6 +31,52 @@ class ProcessingError extends Error {
     super(message);
     this.name = 'ProcessingError';
   }
+}
+
+const PROCESSING_STATUSES = new Set<DocumentProcessingStatus>([
+  'uploaded',
+  'parsing',
+  'indexing',
+  'ready',
+  'failed',
+]);
+
+export async function GET(
+  request: Request,
+  { params }: { params: Promise<{ documentId: string }> },
+) {
+  const context = await getAuthenticatedRequestContext();
+  if (!context) return Response.json({ error: '로그인이 필요합니다.' }, { status: 401 });
+
+  const { documentId } = await params;
+  const versionId = new URL(request.url).searchParams.get('versionId') ?? '';
+  if (!UUID_PATTERN.test(documentId) || !UUID_PATTERN.test(versionId)) {
+    return Response.json({ error: '올바른 문서 식별자가 필요합니다.' }, { status: 400 });
+  }
+
+  const { data: version, error } = await context.supabase
+    .from('document_versions')
+    .select('status,error_message')
+    .eq('id', versionId)
+    .eq('document_id', documentId)
+    .eq('owner_id', context.ownerId)
+    .maybeSingle();
+
+  if (error) {
+    return Response.json({ error: '문서 처리 상태를 조회하지 못했습니다.' }, { status: 500 });
+  }
+  if (!version) return Response.json({ error: '문서를 찾을 수 없습니다.' }, { status: 404 });
+
+  const status = PROCESSING_STATUSES.has(version.status as DocumentProcessingStatus)
+    ? version.status as DocumentProcessingStatus
+    : 'uploaded';
+  const response = {
+    status,
+    errorMessage: version.error_message,
+  } satisfies DocumentProcessingStatusResponse;
+  return Response.json(response, {
+    headers: { 'Cache-Control': 'no-store' },
+  });
 }
 
 export async function POST(

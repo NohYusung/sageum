@@ -20,6 +20,7 @@ import {
   HardDriveUpload,
   Library,
   Link2,
+  ListChecks,
   LoaderCircle,
   LogOut,
   MessageSquareText,
@@ -48,7 +49,11 @@ import {
 } from 'react';
 import { logoutAction } from '@/app/actions';
 import { deleteStoredDocument } from '@/lib/documents/browser-delete';
-import { uploadAndProcessDocument } from '@/lib/documents/browser-upload';
+import {
+  uploadAndProcessDocument,
+  type DocumentUploadProgress,
+  type DocumentUploadStage,
+} from '@/lib/documents/browser-upload';
 import {
   sortRepositoryDocuments,
   sortRepositoryFolders,
@@ -81,7 +86,7 @@ import {
 } from '@/lib/rag/local-search';
 import type { DocumentChunk } from '@/lib/rag/types';
 
-type View = 'chat' | 'documents' | 'upload';
+type View = 'chat' | 'documents' | 'upload' | 'upload-status';
 type InspectorResizeStart = {
   pointerId: number;
   clientX: number;
@@ -94,6 +99,20 @@ type ChatMessage = {
   role: 'assistant' | 'user';
   text: string;
   sources?: SourceReference[];
+};
+
+type UploadJob = {
+  id: string;
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  stage: 'queued' | DocumentUploadStage;
+  state: 'running' | 'ready' | 'failed';
+  documentId?: string;
+  versionId?: string;
+  error?: string;
+  startedAt: string;
+  completedAt?: string;
 };
 
 type SystemStatus = {
@@ -144,6 +163,23 @@ const DOCUMENT_INSPECTOR_WIDTH_KEY = 'sageum:document-inspector-width';
 const DOCUMENT_INSPECTOR_DEFAULT_WIDTH = 560;
 const DOCUMENT_INSPECTOR_MIN_WIDTH = 400;
 const DOCUMENT_INSPECTOR_MAX_VIEWPORT_RATIO = 0.74;
+const UPLOAD_STEPS = ['원본 업로드', '구조 추출', '벡터 색인', '완료'] as const;
+
+const UPLOAD_STAGE_LABELS: Record<UploadJob['stage'], string> = {
+  queued: '처리 대기 중',
+  creating: '업로드 준비 중',
+  uploading: 'Supabase 원본 업로드 중',
+  parsing: '구조 추출 · OCR · 청킹 중',
+  indexing: 'Qdrant 벡터 색인 중',
+  ready: '문서 등록 완료',
+};
+
+function uploadStageStep(stage: UploadJob['stage']) {
+  if (stage === 'parsing') return 1;
+  if (stage === 'indexing') return 2;
+  if (stage === 'ready') return 3;
+  return 0;
+}
 
 function SageumMark() {
   return (
@@ -458,6 +494,7 @@ export function DocumentRagApp({
   const [activeSources, setActiveSources] = useState<SourceReference[]>([]);
   const [uploadMessage, setUploadMessage] = useState<string | null>(null);
   const [uploadBusy, setUploadBusy] = useState(false);
+  const [uploadJobs, setUploadJobs] = useState<UploadJob[]>([]);
   const [deletingDocumentId, setDeletingDocumentId] = useState<string | null>(null);
   const [documentActionError, setDocumentActionError] = useState<{
     documentId: string;
@@ -595,6 +632,11 @@ export function DocumentRagApp({
     () => documents.reduce((sum, document) => sum + document.chunks.length, 0),
     [documents],
   );
+  const uploadJobSummary = useMemo(() => ({
+    running: uploadJobs.filter((job) => job.state === 'running').length,
+    ready: uploadJobs.filter((job) => job.state === 'ready').length,
+    failed: uploadJobs.filter((job) => job.state === 'failed').length,
+  }), [uploadJobs]);
   const filteredDocuments = useMemo(() => {
     const term = documentFilter.trim().toLocaleLowerCase('ko-KR');
     const currentDocuments = documentsInFolderScope(documents, folders, selectedFolderId);
@@ -697,14 +739,80 @@ export function DocumentRagApp({
     window.localStorage.setItem(DOCUMENT_INSPECTOR_WIDTH_KEY, String(nextWidth));
   }
 
+  function updateUploadJob(jobId: string, patch: Partial<UploadJob>) {
+    setUploadJobs((current) => current.map((job) => (
+      job.id === jobId ? { ...job, ...patch } : job
+    )));
+  }
+
+  function openUploadedDocument(documentId: string) {
+    const uploaded = documents.find(({ document }) => document.id === documentId);
+    if (!uploaded) return;
+    setSelectedFolderId(uploaded.document.folderId ?? null);
+    setSelectedDocumentId(documentId);
+    setView('documents');
+  }
+
   async function handleFiles(fileList: FileList | File[], folderId = selectedFolderId) {
     const files = Array.from(fileList);
     if (!files.length) return;
+    const jobs = files.map((file) => {
+      const id = crypto.randomUUID();
+      return {
+        id,
+        file,
+        progress: {
+          id,
+          fileName: file.name,
+          mimeType: file.type,
+          sizeBytes: file.size,
+          stage: 'queued',
+          state: 'running',
+          startedAt: new Date().toISOString(),
+        } satisfies UploadJob,
+      };
+    });
+    setUploadJobs((current) => [...jobs.map(({ progress }) => progress), ...current]);
     setUploadBusy(true);
     setUploadMessage(null);
+    setView('upload-status');
 
     const results = await Promise.allSettled(
-      files.map((file) => uploadAndProcessDocument(file, folderId)),
+      jobs.map(async ({ id, file }) => {
+        try {
+          const document = await uploadAndProcessDocument(
+            file,
+            folderId,
+            (progress: DocumentUploadProgress) => updateUploadJob(id, {
+              stage: progress.stage,
+              documentId: progress.documentId,
+              versionId: progress.versionId,
+            }),
+          );
+          updateUploadJob(id, {
+            stage: 'ready',
+            state: 'ready',
+            documentId: document.document.id,
+            versionId: document.document.versionId,
+            completedAt: new Date().toISOString(),
+          });
+          setDocuments((current) => [
+            document,
+            ...current.filter(({ document: currentDocument }) => (
+              currentDocument.id !== document.document.id
+            )),
+          ]);
+          return document;
+        } catch (error) {
+          const message = error instanceof Error ? error.message : '파일 처리에 실패했습니다.';
+          updateUploadJob(id, {
+            state: 'failed',
+            error: message,
+            completedAt: new Date().toISOString(),
+          });
+          throw error;
+        }
+      }),
     );
 
     const succeeded = results.flatMap((result) => (result.status === 'fulfilled' ? [result.value] : []));
@@ -715,19 +823,12 @@ export function DocumentRagApp({
     );
 
     if (succeeded.length) {
-      const uploadedIds = new Set(succeeded.map(({ document }) => document.id));
-      setDocuments((current) => [
-        ...succeeded,
-        ...current.filter(({ document }) => !uploadedIds.has(document.id)),
-      ]);
-      setSelectedDocumentId(succeeded[0].document.id);
       setSelectedFolderId(folderId);
       setUploadMessage(
         system?.mode === 'cloud'
           ? `${succeeded.length}개 문서를 Supabase에 저장하고 Qdrant에 색인했습니다.`
           : `${succeeded.length}개 문서를 Supabase에 저장하고 청크로 분할했습니다.`,
       );
-      setView('documents');
     }
     if (failures.length) {
       setUploadMessage(`실패: ${failures.join(' ')}`);
@@ -987,6 +1088,15 @@ export function DocumentRagApp({
           <button className={view === 'upload' ? 'active' : ''} type="button" onClick={() => setView('upload')}>
             <HardDriveUpload size={18} />
             문서 추가
+          </button>
+          <button
+            className={view === 'upload-status' ? 'active' : ''}
+            type="button"
+            onClick={() => setView('upload-status')}
+          >
+            <ListChecks size={18} />
+            처리 현황
+            {uploadJobs.length ? <span className="nav-count">{uploadJobs.length}</span> : null}
           </button>
         </nav>
 
@@ -1539,6 +1649,132 @@ export function DocumentRagApp({
                   <strong>원본과 검색 인덱스를 분리합니다</strong>
                   <p>원본은 Supabase private Storage, 문서 메타데이터는 PostgreSQL, 검색 벡터는 Qdrant에 저장하는 구조입니다.</p>
                 </div>
+              </div>
+            </div>
+          </section>
+        ) : null}
+
+        {view === 'upload-status' ? (
+          <section className="upload-status-view">
+            <header className="rag-topbar">
+              <div>
+                <span className="eyebrow">INGESTION ACTIVITY</span>
+                <h1>처리 현황</h1>
+              </div>
+              <button className="primary-action" type="button" onClick={() => setView('upload')}>
+                <UploadCloud size={17} />
+                문서 추가
+              </button>
+            </header>
+
+            <div className="upload-status-content">
+              <section className="upload-status-summary" aria-label="파일 처리 요약">
+                <div className="running">
+                  <span>진행 중</span>
+                  <strong>{uploadJobSummary.running}</strong>
+                </div>
+                <div className="ready">
+                  <span>완료</span>
+                  <strong>{uploadJobSummary.ready}</strong>
+                </div>
+                <div className="failed">
+                  <span>실패</span>
+                  <strong>{uploadJobSummary.failed}</strong>
+                </div>
+              </section>
+
+              <div className="upload-status-heading">
+                <div>
+                  <span className="eyebrow">FILES</span>
+                  <h2>파일별 처리 단계</h2>
+                  <p>현재 브라우저에서 등록한 파일의 업로드·구조 추출·벡터 색인 상태입니다.</p>
+                </div>
+                {uploadJobs.some((job) => job.state !== 'running') ? (
+                  <button
+                    type="button"
+                    onClick={() => setUploadJobs((current) => (
+                      current.filter((job) => job.state === 'running')
+                    ))}
+                  >
+                    완료 내역 지우기
+                  </button>
+                ) : null}
+              </div>
+
+              {uploadMessage ? (
+                <div
+                  className={uploadMessage.includes('실패') ? 'upload-notice error' : 'upload-notice'}
+                  role="status"
+                >
+                  {uploadMessage.includes('실패') ? <XCircle size={18} /> : <CheckCircle2 size={18} />}
+                  {uploadMessage}
+                </div>
+              ) : null}
+
+              <div className="upload-job-list" aria-live="polite">
+                {uploadJobs.map((job) => {
+                  const currentStep = uploadStageStep(job.stage);
+                  return (
+                    <article className={`upload-job ${job.state}`} key={job.id}>
+                      <div className="upload-job-file">
+                        <span className="upload-job-icon">
+                          {job.state === 'failed' ? (
+                            <XCircle size={20} />
+                          ) : job.state === 'ready' ? (
+                            <CheckCircle2 size={20} />
+                          ) : (
+                            <LoaderCircle size={20} className="spin" />
+                          )}
+                        </span>
+                        <div>
+                          <strong title={job.fileName}>{job.fileName}</strong>
+                          <span>
+                            {formatBytes(job.sizeBytes)} · {formatDate(job.startedAt)}
+                          </span>
+                        </div>
+                        <em>{job.state === 'failed' ? '실패' : UPLOAD_STAGE_LABELS[job.stage]}</em>
+                      </div>
+
+                      <ol className="upload-job-steps" aria-label={`${job.fileName} 처리 단계`}>
+                        {UPLOAD_STEPS.map((step, index) => {
+                          const stepState = job.state === 'failed' && index === currentStep
+                            ? 'failed'
+                            : job.state === 'ready' || index < currentStep
+                              ? 'done'
+                              : index === currentStep
+                                ? 'active'
+                                : 'pending';
+                          return (
+                            <li className={stepState} key={step}>
+                              <i aria-hidden="true" />
+                              <span>{step}</span>
+                            </li>
+                          );
+                        })}
+                      </ol>
+
+                      {job.error ? <p className="upload-job-error">{job.error}</p> : null}
+                      {job.state === 'ready' && job.documentId ? (
+                        <button
+                          className="upload-job-open"
+                          type="button"
+                          onClick={() => openUploadedDocument(job.documentId!)}
+                        >
+                          문서 열기
+                          <ChevronRight size={14} />
+                        </button>
+                      ) : null}
+                    </article>
+                  );
+                })}
+                {!uploadJobs.length ? (
+                  <div className="upload-job-empty">
+                    <ListChecks size={28} />
+                    <strong>아직 처리 내역이 없습니다</strong>
+                    <span>문서를 추가하면 파일별 진행 단계가 여기에 표시됩니다.</span>
+                    <button type="button" onClick={() => setView('upload')}>문서 추가하기</button>
+                  </div>
+                ) : null}
               </div>
             </div>
           </section>

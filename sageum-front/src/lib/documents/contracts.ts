@@ -16,6 +16,18 @@ export type ProcessDocumentResponse = {
   document: IndexedDocument;
 };
 
+export type DocumentProcessingStatus =
+  | 'uploaded'
+  | 'parsing'
+  | 'indexing'
+  | 'ready'
+  | 'failed';
+
+export type DocumentProcessingStatusResponse = {
+  status: DocumentProcessingStatus;
+  errorMessage: string | null;
+};
+
 export type SearchDocumentsResponse = {
   answer: string;
   sources: SourceReference[];

@@ -1357,12 +1357,14 @@ svg {
 }
 
 .documents-view,
-.upload-view {
+.upload-view,
+.upload-status-view {
   min-height: 100dvh;
 }
 
 .documents-view .rag-topbar,
-.upload-view .rag-topbar {
+.upload-view .rag-topbar,
+.upload-status-view .rag-topbar {
   position: sticky;
   top: 0;
   z-index: 5;
@@ -2790,6 +2792,305 @@ body.resizing-document-inspector * {
   font-size: 10px;
 }
 
+.upload-status-content {
+  width: min(980px, calc(100% - 48px));
+  margin: 0 auto;
+  padding: 38px 0 60px;
+}
+
+.upload-status-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow-small);
+}
+
+.upload-status-summary > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 88px;
+  padding: 20px 24px;
+  border-right: 1px solid var(--line);
+}
+
+.upload-status-summary > div:last-child {
+  border-right: 0;
+}
+
+.upload-status-summary span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.upload-status-summary strong {
+  font-family: var(--display);
+  font-size: 30px;
+  font-weight: 600;
+}
+
+.upload-status-summary .running strong {
+  color: var(--amber);
+}
+
+.upload-status-summary .ready strong {
+  color: var(--sage);
+}
+
+.upload-status-summary .failed strong {
+  color: var(--danger);
+}
+
+.upload-status-heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 20px;
+  margin-top: 34px;
+}
+
+.upload-status-heading h2 {
+  margin: 5px 0 3px;
+  font-family: var(--display);
+  font-size: 21px;
+  font-weight: 600;
+}
+
+.upload-status-heading p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.upload-status-heading > button,
+.upload-job-open,
+.upload-job-empty button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 34px;
+  padding: 7px 11px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--ink-soft);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.upload-status-heading > button:hover,
+.upload-job-open:hover,
+.upload-job-empty button:hover {
+  border-color: #b6c7bd;
+  background: var(--sage-pale);
+  color: var(--sage-dark);
+}
+
+.upload-status-content > .upload-notice {
+  margin-top: 16px;
+}
+
+.upload-job-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.upload-job {
+  position: relative;
+  padding: 18px 20px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--surface);
+  box-shadow: var(--shadow-small);
+}
+
+.upload-job.running {
+  border-color: #cfdcd4;
+}
+
+.upload-job.failed {
+  border-color: #e7c5bf;
+}
+
+.upload-job-file {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 11px;
+}
+
+.upload-job-icon {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border-radius: 9px;
+  background: var(--sage-pale);
+  color: var(--sage);
+}
+
+.upload-job.failed .upload-job-icon {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.upload-job-file strong,
+.upload-job-file span {
+  display: block;
+}
+
+.upload-job-file strong {
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.upload-job-file div > span {
+  margin-top: 2px;
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: 9px;
+}
+
+.upload-job-file em {
+  color: var(--sage-dark);
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.upload-job.failed .upload-job-file em {
+  color: var(--danger);
+}
+
+.upload-job-steps {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin: 17px 0 0 49px;
+  padding: 0;
+  list-style: none;
+}
+
+.upload-job-steps li {
+  position: relative;
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  color: var(--faint);
+  font-size: 9px;
+  font-weight: 650;
+}
+
+.upload-job-steps li::after {
+  position: absolute;
+  top: 50%;
+  right: 9px;
+  left: 17px;
+  height: 1px;
+  background: var(--line);
+  content: '';
+}
+
+.upload-job-steps li:last-child::after {
+  display: none;
+}
+
+.upload-job-steps li i {
+  z-index: 1;
+  width: 10px;
+  height: 10px;
+  border: 2px solid #c9cec9;
+  border-radius: 50%;
+  background: var(--surface);
+}
+
+.upload-job-steps li span {
+  position: relative;
+  z-index: 1;
+  width: max-content;
+  padding-right: 7px;
+  background: var(--surface);
+}
+
+.upload-job-steps li.done {
+  color: var(--sage);
+}
+
+.upload-job-steps li.done::after {
+  background: #9ab5a5;
+}
+
+.upload-job-steps li.done i {
+  border-color: var(--sage);
+  background: var(--sage);
+}
+
+.upload-job-steps li.active {
+  color: var(--amber);
+}
+
+.upload-job-steps li.active i {
+  border-color: var(--amber);
+  box-shadow: 0 0 0 4px var(--amber-soft);
+}
+
+.upload-job-steps li.failed {
+  color: var(--danger);
+}
+
+.upload-job-steps li.failed i {
+  border-color: var(--danger);
+  background: var(--danger);
+}
+
+.upload-job-error {
+  margin: 13px 0 0 49px;
+  padding: 9px 11px;
+  border-radius: 7px;
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 10px;
+}
+
+.upload-job-open {
+  margin: 13px 0 0 auto;
+}
+
+.upload-job-empty {
+  display: grid;
+  min-height: 290px;
+  padding: 44px;
+  place-items: center;
+  align-content: center;
+  border: 1px dashed var(--line-strong);
+  border-radius: 12px;
+  background: rgb(255 255 255 / 48%);
+  color: var(--faint);
+  text-align: center;
+}
+
+.upload-job-empty strong {
+  margin-top: 13px;
+  color: var(--ink-soft);
+  font-family: var(--display);
+  font-size: 17px;
+}
+
+.upload-job-empty span {
+  margin: 4px 0 17px;
+  font-size: 10px;
+}
+
 @media (max-width: 1180px) {
   .rag-shell:has(.source-panel) {
     grid-template-columns: 220px minmax(0, 1fr) 290px;
@@ -3038,6 +3339,25 @@ body.resizing-document-inspector * {
     padding-top: 24px;
   }
 
+  .upload-status-content {
+    width: calc(100% - 30px);
+    padding-top: 24px;
+  }
+
+  .upload-status-summary > div {
+    min-height: 76px;
+    padding: 16px;
+  }
+
+  .upload-status-summary strong {
+    font-size: 25px;
+  }
+
+  .upload-status-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
   .format-grid {
     grid-template-columns: repeat(2, 1fr);
   }
@@ -3073,6 +3393,57 @@ body.resizing-document-inspector * {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .upload-status-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .upload-status-summary > div {
+    min-height: 60px;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .upload-status-summary > div:last-child {
+    border-bottom: 0;
+  }
+
+  .upload-job {
+    padding: 15px;
+  }
+
+  .upload-job-file {
+    grid-template-columns: 34px minmax(0, 1fr);
+  }
+
+  .upload-job-icon {
+    width: 34px;
+    height: 34px;
+  }
+
+  .upload-job-file em {
+    grid-column: 2;
+    white-space: normal;
+  }
+
+  .upload-job-steps {
+    grid-template-columns: 1fr;
+    gap: 9px;
+    margin-left: 45px;
+  }
+
+  .upload-job-steps li::after {
+    top: 11px;
+    right: auto;
+    bottom: -10px;
+    left: 4px;
+    width: 1px;
+    height: auto;
+  }
+
+  .upload-job-error {
+    margin-left: 45px;
   }
 
   .conversation-intro span {

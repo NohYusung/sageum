@@ -2058,6 +2058,31 @@ body.resizing-document-inspector * {
   background: #f1f0ea;
 }
 
+.document-inspector-close {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  display: grid;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgb(255 255 255 / 72%);
+  color: var(--muted);
+  box-shadow: var(--shadow-small);
+  transition: 120ms ease;
+}
+
+.document-inspector-close:hover,
+.document-inspector-close:focus-visible {
+  border-color: #b6c7bd;
+  outline: 0;
+  background: var(--surface);
+  color: var(--ink);
+}
+
 .large-file-icon {
   width: 58px;
   height: 58px;
@@ -2793,7 +2818,7 @@ body.resizing-document-inspector * {
 
   .document-inspector {
     grid-column: 1 / -1;
-    position: static;
+    position: relative;
     height: auto;
     overflow: visible;
     border-left: 0;
@@ -2849,7 +2874,7 @@ body.resizing-document-inspector * {
   }
 
   .document-inspector {
-    position: static;
+    position: relative;
     height: auto;
     min-height: auto;
     overflow: visible;

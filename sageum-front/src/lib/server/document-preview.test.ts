@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
+import ExcelJS from 'exceljs';
 import {
   buildDocumentPreviewPage,
   renderDocumentPreview,
@@ -55,9 +56,55 @@ test('XLSX를 시트별 표가 포함된 브라우저 문서로 렌더링한다'
 
   assert.match(html, /Summary/u);
   assert.match(html, /Detail/u);
-  assert.match(html, /<table/iu);
+  assert.match(html, /class="sheet-tabs"/u);
+  assert.match(html, /class="spreadsheet-grid"/u);
+  assert.match(html, /<th scope="col">A<\/th>/u);
+  assert.match(html, /class="row-number"/u);
+  assert.match(html, /width:145px/u);
+  assert.match(html, /background-color:#0F766E/iu);
   assert.match(html, /id="block-0"/u);
   assert.match(html, /id="block-1"/u);
+});
+
+test('XLSX 셀 스타일·병합·숫자 형식을 미리보기에 보존한다', async () => {
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet('재무 현황');
+  sheet.mergeCells('A1:C1');
+  sheet.getCell('A1').value = '2026년 실적';
+  sheet.getCell('A1').font = { bold: true, color: { argb: 'FFFFFFFF' } };
+  sheet.getCell('A1').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF123456' } };
+  sheet.getCell('A1').alignment = { horizontal: 'center', vertical: 'middle' };
+  sheet.getRow(1).height = 30;
+  sheet.getColumn(1).width = 24;
+  sheet.getCell('A2').value = 1234.5;
+  sheet.getCell('A2').numFmt = '#,##0.00';
+  const buffer = await workbook.xlsx.writeBuffer();
+  const bytes = new Uint8Array(buffer as unknown as ArrayBuffer);
+  const html = await renderDocumentPreview(bytes, {
+    name: 'styled.xlsx',
+    mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    sizeBytes: bytes.byteLength,
+  }, {
+    sourceSpans: [{
+      blockId: 'block_000000',
+      blockIndex: 0,
+      startOffset: 0,
+      endOffset: 8,
+      startWord: 0,
+      endWord: 2,
+      sheet: '재무 현황',
+      cellRange: 'A1:C2',
+    }],
+  });
+
+  assert.match(html, /colspan="3"/u);
+  assert.match(html, /height:30pt/u);
+  assert.match(html, /width:173px/u);
+  assert.match(html, /background-color:#123456/iu);
+  assert.match(html, /font-weight:700/u);
+  assert.match(html, /text-align:center/u);
+  assert.match(html, /1,234\.50/u);
+  assert.match(html, /class="chunk-range-cell"/u);
 });
 
 test('Markdown과 HTML 미리보기에 구조 블록 위치를 표시한다', async () => {
@@ -132,7 +179,7 @@ test('기존 청크의 블록 범위도 미리보기에서 강조한다', async 
   }, { blockStart: 0, blockEnd: 0 });
 
   assert.match(html, /id="block-0" class="preview-block chunk-range-block"/u);
-  assert.match(html, /<tr class="chunk-range-block">/u);
+  assert.match(html, /class="preview-block chunk-range-block"/u);
 });
 
 test('미리보기 화면과 원본 다운로드 경로를 분리한다', () => {

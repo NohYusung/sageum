@@ -265,6 +265,7 @@ function DocumentInspector({
   documentActionError,
   frameName,
   modal = false,
+  onClose,
   onMoveDocument,
   onDeleteDocument,
   onExpandStructure,
@@ -276,6 +277,7 @@ function DocumentInspector({
   documentActionError: string | null;
   frameName: string;
   modal?: boolean;
+  onClose?: () => void;
   onMoveDocument: (documentId: string, folderId: string | null) => void | Promise<void>;
   onDeleteDocument: (item: IndexedDocument) => void | Promise<void>;
   onExpandStructure: (chunkId: string) => void;
@@ -286,6 +288,17 @@ function DocumentInspector({
 
   return (
     <aside className={`document-inspector${modal ? ' document-inspector-modal' : ''}`}>
+      {onClose ? (
+        <button
+          aria-label="문서 상세 패널 닫기"
+          className="document-inspector-close"
+          title="문서 상세 닫기"
+          type="button"
+          onClick={onClose}
+        >
+          <X size={19} />
+        </button>
+      ) : null}
       <span className={`large-file-icon ${item.document.sourceType}`}>
         <DocumentIcon size={28} />
       </span>
@@ -436,9 +449,7 @@ export function DocumentRagApp({
   const [folderBusy, setFolderBusy] = useState(false);
   const [folderActionError, setFolderActionError] = useState<string | null>(null);
   const [dragOverFolderId, setDragOverFolderId] = useState<string | null | 'root'>(null);
-  const [selectedDocumentId, setSelectedDocumentId] = useState(
-    () => initialDocuments[0]?.document.id ?? '',
-  );
+  const [selectedDocumentId, setSelectedDocumentId] = useState('');
   const [expandedStructureChunkId, setExpandedStructureChunkId] = useState<string | null>(null);
   const [sourcePreview, setSourcePreview] = useState<SourceReference | null>(null);
   const [inspectorWidth, setInspectorWidth] = useState(DOCUMENT_INSPECTOR_DEFAULT_WIDTH);
@@ -598,8 +609,7 @@ export function DocumentRagApp({
     [filteredDocuments],
   );
   const selectedDocument = useMemo(
-    () => filteredDocuments.find(({ document }) => document.id === selectedDocumentId)
-      ?? filteredDocuments[0],
+    () => filteredDocuments.find(({ document }) => document.id === selectedDocumentId),
     [filteredDocuments, selectedDocumentId],
   );
   const sourcePreviewDocument = sourcePreview
@@ -728,9 +738,15 @@ export function DocumentRagApp({
   function selectFolder(folderId: string | null) {
     setSelectedFolderId(folderId);
     setDocumentFilter('');
-    const nextDocument = documents.find(({ document }) => document.folderId === folderId);
-    setSelectedDocumentId(nextDocument?.document.id ?? '');
+    setSelectedDocumentId('');
+    setExpandedStructureChunkId(null);
     setFolderActionError(null);
+  }
+
+  function closeDocumentInspector() {
+    setSelectedDocumentId('');
+    setExpandedStructureChunkId(null);
+    setDocumentActionError(null);
   }
 
   async function handleCreateFolder() {
@@ -1427,6 +1443,7 @@ export function DocumentRagApp({
                       : null
                   }
                   frameName={DOCUMENT_PREVIEW_FRAME_NAME}
+                  onClose={closeDocumentInspector}
                   onMoveDocument={handleMoveDocument}
                   onDeleteDocument={handleDeleteDocument}
                   onExpandStructure={setExpandedStructureChunkId}

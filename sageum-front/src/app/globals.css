@@ -1614,14 +1614,71 @@ svg {
   padding: 22px clamp(20px, 2.5vw, 32px) 12px;
 }
 
-.repository-browser-heading h2 {
-  margin: 4px 0 0;
+.repository-browser-heading > div:first-child {
+  min-width: 0;
+}
+
+.repository-breadcrumb {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin-top: 4px;
+  color: var(--faint);
+}
+
+.repository-breadcrumb > button,
+.repository-breadcrumb .current,
+.repository-breadcrumb-segment,
+.repository-breadcrumb-segment > button {
+  display: inline-flex;
+  align-items: center;
+}
+
+.repository-breadcrumb > button,
+.repository-breadcrumb-segment > button,
+.repository-breadcrumb .current {
+  gap: 6px;
+  min-width: 0;
+  max-width: min(260px, 35vw);
+  padding: 4px 6px;
   overflow: hidden;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
   font-family: var(--display);
-  font-size: 21px;
+  font-size: clamp(17px, 1.4vw, 21px);
   font-weight: 600;
+  letter-spacing: -.015em;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.repository-breadcrumb > button,
+.repository-breadcrumb-segment > button {
+  color: var(--muted);
+}
+
+.repository-breadcrumb > button:hover,
+.repository-breadcrumb-segment > button:hover,
+.repository-breadcrumb > button:focus-visible,
+.repository-breadcrumb-segment > button:focus-visible {
+  outline: 0;
+  background: var(--sage-pale);
+  color: var(--sage-dark);
+}
+
+.repository-breadcrumb .current {
+  color: var(--ink);
+}
+
+.repository-breadcrumb-segment {
+  gap: 3px;
+  min-width: 0;
+}
+
+.repository-breadcrumb-segment > svg {
+  flex: none;
 }
 
 .repository-location-summary {

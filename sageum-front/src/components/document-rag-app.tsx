@@ -1217,8 +1217,33 @@ export function DocumentRagApp({
               <div className="repository-browser">
                 <div className="repository-browser-heading">
                   <div>
-                    <span className="eyebrow">CURRENT FOLDER</span>
-                    <h2>{selectedFolder?.name ?? '내 문서'}</h2>
+                    <span className="eyebrow">FOLDER PATH</span>
+                    <nav className="repository-breadcrumb" aria-label="문서 목록 현재 경로">
+                      {selectedFolderId === null ? (
+                        <span className="current" aria-current="page">
+                          <Home size={17} /> 내 문서
+                        </span>
+                      ) : (
+                        <button type="button" onClick={() => selectFolder(null)}>
+                          <Home size={17} /> 내 문서
+                        </button>
+                      )}
+                      {selectedFolderPath.map((folder, index) => {
+                        const isCurrent = index === selectedFolderPath.length - 1;
+                        return (
+                          <span className="repository-breadcrumb-segment" key={folder.id}>
+                            <ChevronRight size={15} aria-hidden="true" />
+                            {isCurrent ? (
+                              <span className="current" aria-current="page">{folder.name}</span>
+                            ) : (
+                              <button type="button" onClick={() => selectFolder(folder.id)}>
+                                {folder.name}
+                              </button>
+                            )}
+                          </span>
+                        );
+                      })}
+                    </nav>
                     <p className="repository-location-summary">
                       하위 폴더 {childFolders.length}개 · 파일{' '}
                       {folderContentCounts.get(selectedFolderId)?.documents ?? 0}개

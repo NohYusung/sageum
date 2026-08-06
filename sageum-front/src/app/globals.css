@@ -3013,7 +3013,7 @@ body.resizing-document-inspector * {
 }
 
 .upload-job-file strong,
-.upload-job-file span {
+.upload-job-file div > span {
   display: block;
 }
 

@@ -1,12 +1,15 @@
-import { ArrowLeft, Bot, ShieldCheck, Unplug } from 'lucide-react';
+import { ArrowLeft, Bot, ShieldCheck, Unplug, UploadCloud } from 'lucide-react';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { oauthScopeLabels } from '@/lib/auth/oauth-consent';
 import { createClient } from '@/lib/supabase/server';
-import { revokeOAuthConnectionAction } from './actions';
+import {
+  revokeOAuthConnectionAction,
+  setOAuthConnectionUploadPermissionAction,
+} from './actions';
 
 type OAuthConnectionsPageProps = {
-  searchParams: Promise<{ error?: string; revoked?: string }>;
+  searchParams: Promise<{ error?: string; revoked?: string; updated?: string }>;
 };
 
 export default async function OAuthConnectionsPage({ searchParams }: OAuthConnectionsPageProps) {
@@ -15,7 +18,13 @@ export default async function OAuthConnectionsPage({ searchParams }: OAuthConnec
   if (!claimsData?.claims.sub) redirect('/login?next=/oauth/connections');
 
   const params = await searchParams;
-  const { data: grants, error } = await supabase.auth.oauth.listGrants();
+  const [{ data: grants, error }, { data: permissions, error: permissionsError }] = await Promise.all([
+    supabase.auth.oauth.listGrants(),
+    supabase.from('mcp_repository_permissions').select('client_id,can_upload'),
+  ]);
+  const uploadClients = new Set(
+    permissions?.filter((permission) => permission.can_upload).map((permission) => permission.client_id) ?? [],
+  );
   return (
     <main className="oauth-connections-page">
       <header>
@@ -28,7 +37,10 @@ export default async function OAuthConnectionsPage({ searchParams }: OAuthConnec
       </header>
 
       {params.revoked ? <p className="oauth-notice"><ShieldCheck size={16} /> 연결을 해제했습니다.</p> : null}
-      {params.error || error ? (
+      {params.updated ? (
+        <p className="oauth-notice"><ShieldCheck size={16} /> MCP 문서 업로드 권한을 변경했습니다.</p>
+      ) : null}
+      {params.error || error || permissionsError ? (
         <p className="oauth-error" role="alert">OAuth 연결 목록을 처리하지 못했습니다. Supabase OAuth Server 설정을 확인해 주세요.</p>
       ) : null}
 
@@ -43,13 +55,30 @@ export default async function OAuthConnectionsPage({ searchParams }: OAuthConnec
                 {oauthScopeLabels(grant.scopes.join(' ')).map((scope) => (
                   <span key={scope.name}>{scope.name}</span>
                 ))}
+                <span className={uploadClients.has(grant.client.id) ? 'is-write-enabled' : 'is-write-disabled'}>
+                  {uploadClients.has(grant.client.id) ? '문서 업로드 허용' : '읽기 전용'}
+                </span>
               </div>
               <small>승인일 {new Intl.DateTimeFormat('ko-KR', { dateStyle: 'medium' }).format(new Date(grant.granted_at))}</small>
             </div>
-            <form action={revokeOAuthConnectionAction}>
-              <input type="hidden" name="client_id" value={grant.client.id} />
-              <button type="submit"><Unplug size={15} /> 연결 해제</button>
-            </form>
+            <div className="oauth-connection-actions">
+              <form action={setOAuthConnectionUploadPermissionAction}>
+                <input type="hidden" name="client_id" value={grant.client.id} />
+                <input
+                  type="hidden"
+                  name="can_upload"
+                  value={uploadClients.has(grant.client.id) ? 'false' : 'true'}
+                />
+                <button className="oauth-upload-permission" type="submit">
+                  <UploadCloud size={15} />
+                  {uploadClients.has(grant.client.id) ? '업로드 차단' : '업로드 허용'}
+                </button>
+              </form>
+              <form action={revokeOAuthConnectionAction}>
+                <input type="hidden" name="client_id" value={grant.client.id} />
+                <button type="submit"><Unplug size={15} /> 연결 해제</button>
+              </form>
+            </div>
           </article>
         )) : (
           <div className="oauth-empty-state">

@@ -83,6 +83,7 @@ import type {
   DocumentIngestionStatus,
   SearchDocumentsResponse,
 } from '@/lib/documents/contracts';
+import { canResumeDocumentIngestion } from '@/lib/documents/ingestion-jobs';
 import { shouldSubmitChatOnEnter } from '@/lib/rag/chat-keyboard';
 import {
   composeExtractiveAnswer,
@@ -522,8 +523,11 @@ export function DocumentRagApp({
   const [uploadJobFilter, setUploadJobFilter] = useState<UploadJobFilter>('all');
   const [uploadPageSize, setUploadPageSize] = useState<UploadPageSize>(10);
   const [uploadPage, setUploadPage] = useState(1);
-  const [retryingUploadJobId, setRetryingUploadJobId] = useState<string | null>(null);
+  const [retryingUploadJobIds, setRetryingUploadJobIds] = useState<Set<string>>(
+    () => new Set(),
+  );
   const [retryFileJobId, setRetryFileJobId] = useState<string | null>(null);
+  const [uploadRecoveryNow, setUploadRecoveryNow] = useState(() => Date.now());
   const [deletingDocumentId, setDeletingDocumentId] = useState<string | null>(null);
   const [documentActionError, setDocumentActionError] = useState<{
     documentId: string;
@@ -538,6 +542,7 @@ export function DocumentRagApp({
   const sourceModalRef = useRef<HTMLElement | null>(null);
   const sourceModalCloseRef = useRef<HTMLButtonElement | null>(null);
   const sourceModalTriggerRef = useRef<HTMLElement | null>(null);
+  const retryingUploadJobIdsRef = useRef<Set<string>>(new Set());
   const userInitial = userEmail.charAt(0).toLocaleUpperCase('ko-KR') || '?';
 
   useEffect(() => {
@@ -546,6 +551,18 @@ export function DocumentRagApp({
       .then(setSystem)
       .catch(() => setSystem(null));
   }, []);
+
+  useEffect(() => {
+    if (view !== 'upload-status') return;
+    const hasPendingWorkflowStart = uploadJobs.some((job) => (
+      job.status === 'uploading' && !job.workflowRunId
+    ));
+    if (!hasPendingWorkflowStart) return;
+
+    setUploadRecoveryNow(Date.now());
+    const timer = window.setInterval(() => setUploadRecoveryNow(Date.now()), 5_000);
+    return () => window.clearInterval(timer);
+  }, [uploadJobs, view]);
 
   useEffect(() => {
     const conversation = conversationRef.current;
@@ -858,6 +875,7 @@ export function DocumentRagApp({
           lastError: null,
           startedAt: null,
           completedAt: null,
+          workflowRunId: null,
           createdAt: now,
           updatedAt: now,
         } satisfies UploadJob,
@@ -927,7 +945,11 @@ export function DocumentRagApp({
   }
 
   async function retryPersistentUploadJob(job: UploadJob, file?: File) {
-    if (!job.jobId || job.stage === 'creating') return;
+    if (
+      !job.jobId
+      || job.stage === 'creating'
+      || retryingUploadJobIdsRef.current.has(job.id)
+    ) return;
     const persistedJob: DocumentIngestionJob = {
       id: job.jobId,
       documentId: job.documentId,
@@ -944,11 +966,13 @@ export function DocumentRagApp({
       lastError: job.lastError,
       startedAt: job.startedAt,
       completedAt: job.completedAt,
+      workflowRunId: job.workflowRunId,
       createdAt: job.createdAt,
       updatedAt: job.updatedAt,
     };
 
-    setRetryingUploadJobId(job.id);
+    retryingUploadJobIdsRef.current.add(job.id);
+    setRetryingUploadJobIds(new Set(retryingUploadJobIdsRef.current));
     setUploadMessage(null);
     updateUploadJob(job.id, {
       status: file ? 'uploading' : 'processing',
@@ -981,13 +1005,17 @@ export function DocumentRagApp({
       }));
       setUploadMessage(`실패: ${message}`);
     } finally {
-      setRetryingUploadJobId(null);
+      retryingUploadJobIdsRef.current.delete(job.id);
+      setRetryingUploadJobIds(new Set(retryingUploadJobIdsRef.current));
     }
   }
 
   function handleRetryUploadJob(job: UploadJob) {
-    if (retryingUploadJobId) return;
-    if (job.originalAvailable && job.documentId && job.versionId) {
+    if (retryingUploadJobIdsRef.current.has(job.id)) return;
+    if (
+      canResumeDocumentIngestion(job)
+      || job.originalAvailable && job.documentId && job.versionId
+    ) {
       void retryPersistentUploadJob(job);
       return;
     }
@@ -1888,6 +1916,7 @@ export function DocumentRagApp({
                 {paginatedUploadJobs.map((job) => {
                   const currentStep = uploadStageStep(job.stage);
                   const jobClass = uploadJobClass(job);
+                  const canResume = canResumeDocumentIngestion(job, uploadRecoveryNow);
                   return (
                     <article className={`upload-job ${jobClass}`} key={job.id}>
                       <div className="upload-job-file">
@@ -1934,21 +1963,23 @@ export function DocumentRagApp({
 
                       {job.lastError ? <p className="upload-job-error">{job.lastError}</p> : null}
                       <div className="upload-job-actions">
-                        {job.status === 'failed' ? (
+                        {job.status === 'failed' || canResume ? (
                           <button
                             className="upload-job-retry"
                             type="button"
-                            disabled={retryingUploadJobId !== null}
+                            disabled={retryingUploadJobIds.has(job.id)}
                             onClick={() => handleRetryUploadJob(job)}
                           >
-                            {retryingUploadJobId === job.id ? (
+                            {retryingUploadJobIds.has(job.id) ? (
                               <LoaderCircle size={14} className="spin" />
                             ) : (
                               <UploadCloud size={14} />
                             )}
-                            {job.originalAvailable && job.documentId && job.versionId
-                              ? '다시 처리'
-                              : '파일 선택 후 재시도'}
+                            {canResume
+                              ? '처리 재개'
+                              : job.originalAvailable && job.documentId && job.versionId
+                                ? '다시 처리'
+                                : '파일 선택 후 재시도'}
                           </button>
                         ) : null}
                         {job.status === 'ready' && job.documentId ? (

@@ -5,6 +5,7 @@ export type DocumentUploadTicket = {
   jobId: string;
   versionId: string;
   storagePath: string;
+  signedUploadUrl: string;
   uploadToken: string;
   mimeType: string;
 };
@@ -46,6 +47,7 @@ export type DocumentIngestionJob = {
   lastError: string | null;
   startedAt: string | null;
   completedAt: string | null;
+  workflowRunId: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -60,6 +62,15 @@ export type RetryDocumentUploadResponse = {
 
 export type ProcessDocumentResponse = {
   document: IndexedDocument;
+};
+
+export type IndexedDocumentResponse = ProcessDocumentResponse;
+
+export type StartDocumentProcessingResponse = {
+  jobId: string;
+  workflowRunId: string | null;
+  started: boolean;
+  status: string;
 };
 
 export type DocumentProcessingStatus =

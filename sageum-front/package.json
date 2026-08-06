@@ -23,6 +23,7 @@
     "@qdrant/js-client-rest": "1.18.0",
     "@supabase/ssr": "0.12.4",
     "@supabase/supabase-js": "2.111.0",
+    "@workflow/next": "^4.1.4",
     "cheerio": "1.2.0",
     "exceljs": "4.4.0",
     "jszip": "^3.10.1",
@@ -33,6 +34,7 @@
     "react-dom": "^19.2.0",
     "read-excel-file": "9.3.5",
     "unpdf": "1.8.0",
+    "workflow": "^4.8.0",
     "zod": "^4.1.12"
   },
   "devDependencies": {
@@ -43,6 +45,12 @@
     "typescript": "^5.9.0"
   },
   "overrides": {
+    "@workflow/world-local": {
+      "undici": "7.29.0"
+    },
+    "@workflow/world-vercel": {
+      "undici": "7.29.0"
+    },
     "exceljs": {
       "uuid": "11.1.1"
     }

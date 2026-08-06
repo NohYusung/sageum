@@ -28,7 +28,9 @@
 - Claude가 반환한 인용 ID를 실제 검색 청크와 다시 대조
 - 근거가 없거나 유효한 인용이 없으면 답변 생성 거부
 - 답변과 함께 문서명, 제목 경로, 페이지, 시트·셀 범위 표시
-- Supabase OAuth 2.1로 보호된 사용자별 읽기 전용 원격 MCP와 6개 저장소 도구
+- Vercel Workflow 기반 비동기 문서 처리와 브라우저 종료 후 자동 재시도
+- Supabase OAuth 2.1로 보호된 사용자별 원격 MCP와 9개 저장소 도구
+- OAuth 클라이언트별 선택적 문서 업로드 권한과 DB·Storage 직접 쓰기 차단
 
 ## 아키텍처
 
@@ -37,9 +39,10 @@ flowchart LR
   U["사용자 브라우저"] -->|"로그인·업로드·질문"| N["Vercel / Next.js"]
   N -->|"signed upload URL"| U
   U -->|"원본 직접 업로드"| S["Supabase private Storage"]
-  N -->|"문서·버전·청크"| P["Supabase PostgreSQL"]
-  N -->|"원본 다운로드·형식별 파싱"| S
-  N -->|"청크 색인"| Q["Qdrant Cloud Inference"]
+  N -->|"비동기 실행"| W["Vercel Workflow"]
+  W -->|"문서·버전·청크"| P["Supabase PostgreSQL"]
+  W -->|"원본 다운로드·형식별 파싱"| S
+  W -->|"청크 색인"| Q["Qdrant Cloud Inference"]
   Q -->|"dense + BM25 검색 근거"| N
   N -->|"질문 + 제한된 근거"| C["Claude Platform on AWS"]
   N -->|"PDF·내장 이미지 OCR/설명"| C
@@ -49,6 +52,7 @@ flowchart LR
   M -->|"OAuth 탐색·사용자 동의"| SA["Supabase Auth"]
   M -->|"owner_id 제한 검색"| Q
   M -->|"문서·폴더·원본 조회"| P
+  M -->|"권한 확인·signed upload"| W
 ```
 
 ### 저장 책임
@@ -62,7 +66,9 @@ flowchart LR
   - `folders`: 사용자 가상 폴더와 상위 폴더 관계
   - `document_versions`: Storage 경로, MIME, 처리 상태, 해시
   - `document_chunks`: 청크 본문과 제목·페이지·시트 위치
+  - `document_ingestion_jobs`: 영구 처리 이력, 단계, 재시도, Workflow 실행 ID
   - `document_deletion_jobs`: 외부 리소스 삭제 상태와 재시도 정보
+  - `mcp_repository_permissions`: 사용자·OAuth 클라이언트별 업로드 허용 여부
   - public 테이블에는 RLS를 적용하고 `owner_id = auth.uid()`를 강제합니다.
 - Qdrant
   - 기본 Collection: `document_chunks_qdrant_hybrid_v2`
@@ -81,13 +87,14 @@ flowchart LR
 1. 로그인 사용자의 파일 확장자, MIME, 크기를 검증합니다.
 2. Supabase에 문서와 버전을 만들고 signed upload URL을 발급합니다.
 3. 브라우저가 원본을 private Storage에 직접 업로드합니다.
-4. Next.js 서버가 원본을 내려받아 형식별 파서로 구조를 추출합니다.
-5. PDF 시각 자료와 DOCX/XLSX/HTML 내장 이미지를 Claude Vision으로 OCR·설명합니다.
-6. OCR 결과를 페이지·시트·이미지 위치가 있는 `image` 블록으로 합칩니다.
-7. 구조와 위치 경계를 유지하면서 단어 수 기준으로 청킹합니다.
-8. PostgreSQL에 청크를 저장합니다.
-9. Qdrant Cloud Inference로 dense·sparse 벡터를 생성하고 색인합니다.
-10. 전체 과정이 끝나면 문서 버전을 `ready`로 전환합니다.
+4. Next.js가 Vercel Workflow를 시작하고 즉시 작업 ID를 반환합니다.
+5. Workflow step이 서버 전용 Supabase 권한으로 원본을 내려받아 형식별 구조를 추출합니다.
+6. PDF 시각 자료와 DOCX/XLSX/HTML 내장 이미지를 Claude Vision으로 OCR·설명합니다.
+7. OCR 결과를 페이지·시트·이미지 위치가 있는 `image` 블록으로 합칩니다.
+8. 구조와 위치 경계를 유지하면서 단어 수 기준으로 청킹합니다.
+9. PostgreSQL에 청크를 저장하고 Qdrant Cloud Inference로 색인합니다.
+10. 처리 단계와 실패 사유를 `document_ingestion_jobs`에 영구 저장하고, 일시 오류는 최대 3회 재시도합니다.
+11. 브라우저는 상태만 조회하므로 처리 시작 후 창을 닫아도 서버 작업은 계속됩니다.
 
 ### 이미지 OCR
 
@@ -122,10 +129,14 @@ flowchart LR
 2. MCP 보호 리소스 메타데이터가 Supabase OAuth 2.1 Authorization Server를 안내합니다.
 3. 외부 에이전트는 브라우저에서 Sageum 로그인과 사용자 동의를 완료하고 Access Token을 발급받습니다.
 4. 서버는 JWT 서명·발급자·만료·`client_id`를 검증하고 `sub`를 문서 `owner_id`로 사용합니다.
-5. DB 조회는 OAuth Access Token과 기존 RLS를 사용하며 Qdrant에도 검증된 `owner_id` 필터를 강제합니다.
+5. DB 조회는 OAuth Access Token과 RLS를 사용하며 Qdrant에도 검증된 `owner_id` 필터를 강제합니다.
 6. `search_repository`는 웹 챗봇과 같은 Qdrant dense + BM25 검색 근거를 반환합니다.
 7. `list_folders`, `list_documents`, `get_document`, `get_chunk`, `get_original_link`를 읽기 전용으로 제공합니다.
-8. 외부 에이전트가 검색 근거를 직접 판단하며 Sageum의 Claude 답변을 중복 호출하지 않습니다.
+8. `get_ingestion_status`로 업로드·파싱·OCR·색인 상태와 실패 사유를 조회합니다.
+9. 사용자가 클라이언트별 업로드 권한을 켜면 `create_upload`가 2시간 signed URL을 발급하고, 원본 PUT 후 `complete_upload`가 Workflow를 시작합니다.
+10. Supabase OAuth가 사용자 정의 scope를 지원하지 않으므로 쓰기 권한은 `owner_id + client_id`로 별도 관리합니다.
+11. OAuth 토큰의 Data API·Storage 직접 쓰기는 RLS로 차단하며, 검증된 업로드만 Sageum 서버가 수행합니다.
+12. 외부 에이전트가 검색 근거를 직접 판단하며 Sageum의 Claude 답변을 중복 호출하지 않습니다.
 
 ### 문서 삭제
 
@@ -143,6 +154,7 @@ flowchart LR
 - Vector DB/Search: Qdrant Cloud, Qdrant Cloud Inference
 - Embedding: `intfloat/multilingual-e5-small`
 - Answer model: Claude Haiku 4.5 on Claude Platform on AWS
+- Durable jobs: Vercel Workflow DevKit
 - Deployment target: Vercel
 
 ## 로컬 실행
@@ -187,7 +199,7 @@ AWS_REGION=ap-northeast-2
 ANTHROPIC_AWS_API_KEY=your-claude-platform-aws-api-key
 CLAUDE_AWS_MODEL=claude-haiku-4-5
 
-# OAuth-protected read-only MCP
+# OAuth-protected MCP
 SAGEUM_MCP_ALLOWED_ORIGINS=
 SAGEUM_MCP_URL=http://localhost:3000/api/mcp
 SAGEUM_MCP_ACCESS_TOKEN=
@@ -222,6 +234,8 @@ npm run dev
 - `documents`, `document_versions`, `document_chunks` 테이블과 사용자별 RLS 정책이 필요합니다.
 - 삭제 정합성 스키마는 `docs/document-deletion-schema.sql`을 적용합니다.
 - 가상 폴더 스키마는 `docs/folder-management-schema.sql`에 기록되어 있습니다.
+- 영구 처리 이력과 Workflow 필드는 `docs/document-ingestion-schema.sql`에 기록되어 있습니다.
+- MCP 업로드 권한과 OAuth 직접 쓰기 차단은 `docs/mcp-write-permissions-schema.sql`, `docs/mcp-oauth-write-boundary-schema.sql`에 기록되어 있습니다.
 - Storage와 데이터베이스의 사용자 소유권은 모두 로그인한 `auth.uid()`를 기준으로 제한합니다.
 
 ### Qdrant
@@ -284,9 +298,10 @@ npm run mcp:smoke -- "환경 변수 명세는 무엇인가?"
 ```
 
 - OAuth로 발급한 단기 Access Token을 `SAGEUM_MCP_ACCESS_TOKEN`에 넣습니다.
-- 첫 명령은 OAuth 인증, 프로토콜 연결, 읽기 전용 도구 6개를 확인합니다.
+- 첫 명령은 OAuth 인증, 프로토콜 연결과 저장소 도구를 확인합니다.
 - 질문을 추가하면 실제 Qdrant 저장소 검색까지 확인합니다.
 - OAuth 지원 외부 에이전트에는 `https://sageum.vercel.app/api/mcp` URL만 등록하면 브라우저 승인이 시작됩니다.
+- 문서 업로드는 `/oauth/connections`에서 해당 클라이언트의 `업로드 허용`을 켠 뒤 `create_upload → PUT → complete_upload → get_ingestion_status` 순서로 실행합니다.
 
 ## 배포
 
@@ -302,6 +317,7 @@ npm run mcp:smoke -- "환경 변수 명세는 무엇인가?"
   5. 문서 질문과 Claude 답변
   6. 페이지·시트 위치가 포함된 출처 표시
   7. `/api/mcp` OAuth 브라우저 승인과 저장소 검색
+  8. MCP 클라이언트 업로드 권한, signed URL PUT, 백그라운드 처리 상태 조회
 
 ## 현재 제한사항
 
@@ -323,6 +339,7 @@ sageum/
 │   ├── src/components/           # 문서 저장소·챗 UI
 │   ├── src/lib/rag/              # 파서 공통 타입·청킹·검색 계약
 │   ├── src/lib/server/           # Supabase·Qdrant·Claude 서버 로직
+│   ├── src/workflows/            # Vercel Workflow 문서 처리 오케스트레이션
 │   └── test/fixtures/            # PDF·DOCX·XLSX 테스트 문서
 ├── docs/                         # 설계 기록
 ├── sageum-back/                  # 이전 NestJS 실험 코드

@@ -32,13 +32,16 @@ async function main() {
       'get_document',
       'get_chunk',
       'get_original_link',
+      'create_upload',
+      'complete_upload',
+      'get_ingestion_status',
     ];
     const names = tools.map((tool) => tool.name);
     if (expected.some((name) => !names.includes(name))) {
       throw new Error(`필수 MCP 도구가 없습니다: ${expected.filter((name) => !names.includes(name)).join(', ')}`);
     }
     console.log(`MCP 연결 성공: ${endpoint}`);
-    console.log(`읽기 전용 도구 ${tools.length}개 확인: ${names.join(', ')}`);
+    console.log(`저장소 도구 ${tools.length}개 확인: ${names.join(', ')}`);
 
     const question = process.argv.slice(2).join(' ').trim();
     if (question) {

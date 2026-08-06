@@ -82,6 +82,45 @@ export async function listIndexedDocuments(
   });
 }
 
+export async function getIndexedDocument(
+  supabase: SupabaseClient<Database>,
+  ownerId: string,
+  documentId: string,
+): Promise<IndexedDocument | null> {
+  const { data: document, error: documentError } = await supabase
+    .from('documents')
+    .select('*')
+    .eq('id', documentId)
+    .eq('owner_id', ownerId)
+    .maybeSingle();
+
+  if (documentError) throw new Error('문서를 불러오지 못했습니다.');
+  if (!document?.latest_version_id) return null;
+
+  const [versionResult, chunksResult] = await Promise.all([
+    supabase
+      .from('document_versions')
+      .select('*')
+      .eq('id', document.latest_version_id)
+      .eq('document_id', documentId)
+      .eq('owner_id', ownerId)
+      .maybeSingle(),
+    supabase
+      .from('document_chunks')
+      .select('*')
+      .eq('version_id', document.latest_version_id)
+      .eq('document_id', documentId)
+      .eq('owner_id', ownerId)
+      .order('ordinal', { ascending: true }),
+  ]);
+
+  if (versionResult.error || chunksResult.error) {
+    throw new Error('문서 인덱스를 불러오지 못했습니다.');
+  }
+  if (!versionResult.data) return null;
+  return mapStoredDocument(document, versionResult.data, chunksResult.data);
+}
+
 export async function listFolders(
   supabase: SupabaseClient<Database>,
   ownerId: string,

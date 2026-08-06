@@ -165,6 +165,7 @@ export async function POST(
       jobId,
       versionId: job.version_id,
       storagePath: version.storage_path,
+      signedUploadUrl: signedUpload.signedUrl,
       uploadToken: signedUpload.token,
       mimeType: metadata.mimeType,
     },

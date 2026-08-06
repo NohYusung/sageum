@@ -14,6 +14,8 @@ create table if not exists public.document_ingestion_jobs (
   stage text not null default 'queued',
   attempts integer not null default 1,
   original_available boolean not null default false,
+  processing_token text,
+  workflow_run_id text,
   last_error text,
   started_at timestamptz,
   completed_at timestamptz,
@@ -32,6 +34,10 @@ create table if not exists public.document_ingestion_jobs (
   constraint document_ingestion_jobs_attempts_check
     check (attempts >= 1)
 );
+
+alter table public.document_ingestion_jobs
+  add column if not exists processing_token text,
+  add column if not exists workflow_run_id text;
 
 create unique index if not exists document_ingestion_jobs_version_unique
   on public.document_ingestion_jobs (version_id)

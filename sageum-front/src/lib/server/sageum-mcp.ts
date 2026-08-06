@@ -1,8 +1,11 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import * as z from 'zod/v4';
 import {
+  completeMcpDocumentUpload,
+  createMcpDocumentUpload,
   getMcpChunk,
   getMcpDocument,
+  getMcpIngestionStatus,
   getMcpOriginalLink,
   listMcpDocuments,
   listMcpFolders,
@@ -30,10 +33,19 @@ function readOnlyAnnotations() {
   };
 }
 
+function writeAnnotations({ idempotent = false }: { idempotent?: boolean } = {}) {
+  return {
+    readOnlyHint: false,
+    destructiveHint: false,
+    idempotentHint: idempotent,
+    openWorldHint: true,
+  };
+}
+
 export function createSageumMcpServer(access: McpRepositoryAccess) {
   const server = new McpServer({
     name: 'sageum-document-repository',
-    version: '1.0.0',
+    version: '1.1.0',
   });
 
   server.registerTool('search_repository', {
@@ -95,6 +107,42 @@ export function createSageumMcpServer(access: McpRepositoryAccess) {
     annotations: readOnlyAnnotations(),
   }, async ({ documentId }) => jsonToolResult({
     original: await getMcpOriginalLink(access, documentId),
+  }));
+
+  server.registerTool('create_upload', {
+    title: '문서 업로드 준비',
+    description: 'Sageum에 새 문서와 처리 작업을 만들고 2시간 동안 유효한 Supabase signed upload URL을 발급합니다. 반환된 URL에 파일 원본을 HTTP PUT한 뒤 complete_upload를 호출하세요. Sageum에서 해당 OAuth 클라이언트의 업로드 권한을 별도로 허용해야 합니다.',
+    inputSchema: {
+      name: z.string().trim().min(1).max(1_024).describe('확장자를 포함한 원본 파일명'),
+      mimeType: z.string().trim().min(1).max(255).describe('원본 파일의 MIME type'),
+      sizeBytes: z.number().int().min(1).max(10 * 1_024 * 1_024).describe('원본 파일 크기(byte)'),
+      folderId: UUID.optional().describe('저장할 Sageum 가상 폴더 ID'),
+    },
+    annotations: writeAnnotations(),
+  }, async ({ name, mimeType, sizeBytes, folderId }) => jsonToolResult({
+    upload: await createMcpDocumentUpload(access, { name, mimeType, sizeBytes, folderId }),
+  }));
+
+  server.registerTool('complete_upload', {
+    title: '문서 업로드 완료',
+    description: 'create_upload로 받은 signed URL에 원본 PUT이 끝난 후 호출합니다. 브라우저 연결과 독립적인 백그라운드 파싱·OCR·청킹·Qdrant 색인을 시작합니다.',
+    inputSchema: {
+      documentId: UUID,
+      versionId: UUID,
+      jobId: UUID,
+    },
+    annotations: writeAnnotations({ idempotent: true }),
+  }, async ({ documentId, versionId, jobId }) => jsonToolResult({
+    processing: await completeMcpDocumentUpload(access, { documentId, versionId, jobId }),
+  }));
+
+  server.registerTool('get_ingestion_status', {
+    title: '문서 처리 상태',
+    description: 'create_upload에서 받은 jobId로 업로드 및 백그라운드 색인 진행 상태와 실패 사유를 조회합니다.',
+    inputSchema: { jobId: UUID },
+    annotations: readOnlyAnnotations(),
+  }, async ({ jobId }) => jsonToolResult({
+    ingestion: await getMcpIngestionStatus(access, jobId),
   }));
 
   return server;

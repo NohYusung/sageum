@@ -1,4 +1,4 @@
-import { Bot, Database, FileSearch, ShieldCheck } from 'lucide-react';
+import { Bot, Database, FileSearch, ShieldCheck, UploadCloud } from 'lucide-react';
 import { redirect } from 'next/navigation';
 import {
   oauthScopeLabels,
@@ -68,7 +68,7 @@ export default async function OAuthConsentPage({ searchParams }: OAuthConsentPag
         <div className="auth-story-copy">
           <span className="eyebrow">OAUTH 2.1 AUTHORIZATION</span>
           <h1 id="oauth-title">내 문서 저장소를<br />에이전트와 연결합니다.</h1>
-          <p>승인된 에이전트는 현재 계정이 소유한 구조화 문서와 검색 근거만 읽을 수 있습니다.</p>
+          <p>승인된 에이전트는 현재 계정의 문서를 검색하며, 선택한 경우 새 문서도 안전하게 업로드할 수 있습니다.</p>
         </div>
         <div className="auth-features">
           <span><FileSearch size={18} /> 근거 청크 검색</span>
@@ -104,10 +104,20 @@ export default async function OAuthConsentPage({ searchParams }: OAuthConsentPag
           </div>
 
           <p className="oauth-account">연결 계정 <strong>{data.user.email}</strong></p>
-          <form className="oauth-consent-actions" action="/api/oauth/decision" method="post">
+          <form className="oauth-consent-form" action="/api/oauth/decision" method="post">
             <input type="hidden" name="authorization_id" value={authorizationId} />
-            <button className="auth-secondary" type="submit" name="decision" value="deny">거부</button>
-            <button className="auth-primary" type="submit" name="decision" value="approve">연결 승인</button>
+            <label className="oauth-upload-consent">
+              <input type="checkbox" name="allow_upload" />
+              <span><UploadCloud size={17} /></span>
+              <span>
+                <strong>문서 업로드 권한 허용</strong>
+                <small>signed URL 발급과 백그라운드 OCR·색인을 허용합니다. 기본값은 읽기 전용입니다.</small>
+              </span>
+            </label>
+            <div className="oauth-consent-actions">
+              <button className="auth-secondary" type="submit" name="decision" value="deny">거부</button>
+              <button className="auth-primary" type="submit" name="decision" value="approve">연결 승인</button>
+            </div>
           </form>
           <small className="auth-privacy"><ShieldCheck size={14} /> Sageum은 OAuth 비밀번호를 외부 에이전트에 전달하지 않습니다.</small>
         </div>

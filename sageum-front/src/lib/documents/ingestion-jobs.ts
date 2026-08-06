@@ -7,6 +7,15 @@ import type { Tables } from '@/lib/supabase/database.types';
 
 type StoredIngestionJob = Tables<'document_ingestion_jobs'>;
 
+export const INGESTION_RECOVERY_DELAY_MS = 30_000;
+
+type RecoverableIngestionJob = Pick<
+  DocumentIngestionJob,
+  'documentId' | 'status' | 'updatedAt' | 'versionId' | 'workflowRunId'
+> & {
+  stage: DocumentIngestionJob['stage'] | 'creating';
+};
+
 const STATUSES = new Set<DocumentIngestionStatus>([
   'queued',
   'uploading',
@@ -25,6 +34,19 @@ const STAGES = new Set<DocumentIngestionStage>([
   'ready',
   'failed',
 ]);
+
+export function canResumeDocumentIngestion(
+  job: RecoverableIngestionJob,
+  now = Date.now(),
+) {
+  const updatedAt = Date.parse(job.updatedAt);
+  return job.status === 'uploading'
+    && job.stage === 'uploading'
+    && Boolean(job.documentId && job.versionId)
+    && !job.workflowRunId
+    && Number.isFinite(updatedAt)
+    && now - updatedAt >= INGESTION_RECOVERY_DELAY_MS;
+}
 
 export function mapStoredIngestionJob(row: StoredIngestionJob): DocumentIngestionJob {
   return {
@@ -47,6 +69,7 @@ export function mapStoredIngestionJob(row: StoredIngestionJob): DocumentIngestio
     lastError: row.last_error,
     startedAt: row.started_at,
     completedAt: row.completed_at,
+    workflowRunId: row.workflow_run_id,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

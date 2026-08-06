@@ -22,6 +22,7 @@ export async function POST(request: Request) {
   const formData = await request.formData();
   const authorizationId = validOAuthAuthorizationId(String(formData.get('authorization_id') ?? ''));
   const decision = formData.get('decision');
+  const allowUpload = formData.get('allow_upload') === 'on';
   if (!authorizationId || (decision !== 'approve' && decision !== 'deny')) {
     return Response.json({ error: '올바른 OAuth 승인 정보가 필요합니다.' }, { status: 400 });
   }
@@ -30,6 +31,25 @@ export async function POST(request: Request) {
   const { data: claimsData } = await supabase.auth.getClaims();
   if (!claimsData?.claims.sub) {
     return Response.json({ error: '로그인이 필요합니다.' }, { status: 401 });
+  }
+
+  const ownerId = claimsData.claims.sub;
+  if (decision === 'approve') {
+    const { data: authorization, error: authorizationError } = await supabase.auth.oauth
+      .getAuthorizationDetails(authorizationId);
+    if (authorizationError || !authorization || !('authorization_id' in authorization)) {
+      return consentErrorRedirect(request, authorizationId);
+    }
+
+    const { error: permissionError } = await supabase
+      .from('mcp_repository_permissions')
+      .upsert({
+        owner_id: ownerId,
+        client_id: authorization.client.id,
+        can_upload: allowUpload,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'owner_id,client_id' });
+    if (permissionError) return consentErrorRedirect(request, authorizationId);
   }
 
   const result = decision === 'approve'

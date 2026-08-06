@@ -2,6 +2,7 @@ import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/
 import { authenticateMcpRequest, isAllowedMcpOrigin } from '@/lib/server/mcp-auth';
 import { sageumMcpAuthenticateChallenge } from '@/lib/server/mcp-oauth';
 import { createSageumMcpServer } from '@/lib/server/sageum-mcp';
+import { canMcpClientUpload } from '@/lib/server/mcp-write-permissions';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -60,9 +61,15 @@ export async function POST(request: Request) {
   const authorization = await authorize(request);
   if (!authorization.ok) return withResponseHeaders(authorization.response, request);
 
+  const canUpload = await canMcpClientUpload(
+    authorization.ownerId,
+    authorization.authInfo.clientId,
+  );
   const server = createSageumMcpServer({
     ownerId: authorization.ownerId,
     accessToken: authorization.accessToken,
+    clientId: authorization.authInfo.clientId,
+    canUpload,
   });
   const transport = new WebStandardStreamableHTTPServerTransport({
     sessionIdGenerator: undefined,

@@ -442,6 +442,53 @@ svg {
   margin-top: 20px;
 }
 
+.oauth-consent-form {
+  margin-top: 18px;
+}
+
+.oauth-consent-form .oauth-consent-actions {
+  margin-top: 12px;
+}
+
+.oauth-upload-consent {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  gap: 9px;
+  align-items: center;
+  padding: 11px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--paper);
+  cursor: pointer;
+}
+
+.oauth-upload-consent > span:first-of-type {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border-radius: 8px;
+  background: var(--sage-pale);
+  color: var(--sage-dark);
+}
+
+.oauth-upload-consent strong,
+.oauth-upload-consent small {
+  display: block;
+}
+
+.oauth-upload-consent strong {
+  color: var(--ink-soft);
+  font-size: 10px;
+}
+
+.oauth-upload-consent small {
+  margin-top: 2px;
+  color: var(--faint);
+  font-size: 8px;
+  line-height: 1.45;
+}
+
 .oauth-consent-actions button {
   min-height: 45px;
   border-radius: 9px;
@@ -594,6 +641,22 @@ svg {
   font-size: 8px;
 }
 
+.oauth-connection-scopes .is-write-enabled {
+  background: #dcecdf;
+  color: var(--sage-dark);
+}
+
+.oauth-connection-scopes .is-write-disabled {
+  background: var(--paper-deep);
+  color: var(--faint);
+}
+
+.oauth-connection-actions {
+  display: flex;
+  align-items: stretch;
+  gap: 7px;
+}
+
 .oauth-connection-list form button {
   display: flex;
   align-items: center;
@@ -609,6 +672,15 @@ svg {
 
 .oauth-connection-list form button:hover {
   background: var(--danger-soft);
+}
+
+.oauth-connection-list form .oauth-upload-permission {
+  border-color: #cfe0d6;
+  color: var(--sage-dark);
+}
+
+.oauth-connection-list form .oauth-upload-permission:hover {
+  background: var(--sage-pale);
 }
 
 .oauth-empty-state {
@@ -3352,8 +3424,10 @@ body.resizing-document-inspector * {
     grid-template-columns: auto minmax(0, 1fr);
   }
 
-  .oauth-connection-list article form {
+  .oauth-connection-actions {
     grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
   }
 
   .oauth-connection-list form button {

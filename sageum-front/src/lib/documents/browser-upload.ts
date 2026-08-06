@@ -7,8 +7,9 @@ import type {
   DocumentIngestionJobResponse,
   DocumentIngestionStage,
   DocumentUploadTicket,
-  ProcessDocumentResponse,
+  IndexedDocumentResponse,
   RetryDocumentUploadResponse,
+  StartDocumentProcessingResponse,
 } from '@/lib/documents/contracts';
 import type { IndexedDocument } from '@/lib/rag/local-search';
 import { createClient } from '@/lib/supabase/client';
@@ -75,10 +76,8 @@ async function uploadOriginal(
 }
 
 async function markMissingUploadAsFailed(ticket: DocumentUploadTicket) {
-  await fetch(`/api/documents/${encodeURIComponent(ticket.documentId)}/process`, {
+  await fetch(`/api/ingestion-jobs/${encodeURIComponent(ticket.jobId)}/upload-failed`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ versionId: ticket.versionId, jobId: ticket.jobId }),
   }).catch(() => undefined);
 }
 
@@ -90,21 +89,17 @@ export async function fetchDocumentIngestionJob(jobId: string) {
   return payload.job;
 }
 
-async function pollProcessingStatus(
+async function waitForProcessingCompletion(
   ticket: Pick<DocumentUploadTicket, 'documentId' | 'jobId' | 'versionId'>,
-  shouldStop: () => boolean,
   onProgress?: (progress: DocumentUploadProgress) => void,
 ) {
-  while (!shouldStop()) {
+  while (true) {
     await wait(PROCESSING_STATUS_POLL_MS);
-    if (shouldStop()) return;
-
-    try {
-      const job = await fetchDocumentIngestionJob(ticket.jobId);
-      onProgress?.(progressFromTicket(job.stage, ticket));
-      if (job.status === 'ready' || job.status === 'failed') return;
-    } catch {
-      // 상태 조회 실패는 실제 처리 요청 결과로 판정합니다.
+    const job = await fetchDocumentIngestionJob(ticket.jobId);
+    onProgress?.(progressFromTicket(job.stage, ticket));
+    if (job.status === 'ready') return job;
+    if (job.status === 'failed') {
+      throw new Error(job.lastError || '문서 처리에 실패했습니다.');
     }
   }
 }
@@ -114,25 +109,24 @@ export async function processStoredDocument(
   onProgress?: (progress: DocumentUploadProgress) => void,
 ): Promise<IndexedDocument> {
   onProgress?.(progressFromTicket('parsing', ticket));
-  let stopPolling = false;
-  const statusPolling = pollProcessingStatus(ticket, () => stopPolling, onProgress);
+  const processResponse = await fetch(
+    `/api/documents/${encodeURIComponent(ticket.documentId)}/process`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ versionId: ticket.versionId, jobId: ticket.jobId }),
+    },
+  );
+  await responseJson<StartDocumentProcessingResponse>(processResponse);
+  await waitForProcessingCompletion(ticket, onProgress);
 
-  try {
-    const processResponse = await fetch(
-      `/api/documents/${encodeURIComponent(ticket.documentId)}/process`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ versionId: ticket.versionId, jobId: ticket.jobId }),
-      },
-    );
-    const processed = await responseJson<ProcessDocumentResponse>(processResponse);
-    onProgress?.(progressFromTicket('ready', ticket));
-    return processed.document;
-  } finally {
-    stopPolling = true;
-    await statusPolling;
-  }
+  const documentResponse = await fetch(
+    `/api/documents/${encodeURIComponent(ticket.documentId)}`,
+    { cache: 'no-store' },
+  );
+  const processed = await responseJson<IndexedDocumentResponse>(documentResponse);
+  onProgress?.(progressFromTicket('ready', ticket));
+  return processed.document;
 }
 
 export async function uploadAndProcessDocument(

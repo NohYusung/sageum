@@ -134,6 +134,7 @@ export type Database = {
           mime_type: string;
           original_available: boolean;
           owner_id: string;
+          processing_token: string | null;
           retry_of_job_id: string | null;
           size_bytes: number;
           stage: string;
@@ -141,6 +142,7 @@ export type Database = {
           status: string;
           updated_at: string;
           version_id: string | null;
+          workflow_run_id: string | null;
         };
         Insert: {
           attempts?: number;
@@ -154,6 +156,7 @@ export type Database = {
           mime_type: string;
           original_available?: boolean;
           owner_id: string;
+          processing_token?: string | null;
           retry_of_job_id?: string | null;
           size_bytes: number;
           stage?: string;
@@ -161,6 +164,7 @@ export type Database = {
           status?: string;
           updated_at?: string;
           version_id?: string | null;
+          workflow_run_id?: string | null;
         };
         Update: {
           attempts?: number;
@@ -174,6 +178,7 @@ export type Database = {
           mime_type?: string;
           original_available?: boolean;
           owner_id?: string;
+          processing_token?: string | null;
           retry_of_job_id?: string | null;
           size_bytes?: number;
           stage?: string;
@@ -181,6 +186,7 @@ export type Database = {
           status?: string;
           updated_at?: string;
           version_id?: string | null;
+          workflow_run_id?: string | null;
         };
         Relationships: [
           {
@@ -200,7 +206,7 @@ export type Database = {
           {
             foreignKeyName: 'document_ingestion_jobs_version_id_fkey';
             columns: ['version_id'];
-            isOneToOne: true;
+            isOneToOne: false;
             referencedRelation: 'document_versions';
             referencedColumns: ['id'];
           },
@@ -258,6 +264,30 @@ export type Database = {
             referencedColumns: ['id', 'owner_id'];
           },
         ];
+      };
+      mcp_repository_permissions: {
+        Row: {
+          can_upload: boolean;
+          client_id: string;
+          created_at: string;
+          owner_id: string;
+          updated_at: string;
+        };
+        Insert: {
+          can_upload?: boolean;
+          client_id: string;
+          created_at?: string;
+          owner_id: string;
+          updated_at?: string;
+        };
+        Update: {
+          can_upload?: boolean;
+          client_id?: string;
+          created_at?: string;
+          owner_id?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
       };
       documents: {
         Row: {

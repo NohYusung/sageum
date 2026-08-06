@@ -3,23 +3,23 @@
 import type {
   ApiErrorResponse,
   CreateDocumentUploadResponse,
-  DocumentProcessingStatusResponse,
+  DocumentIngestionJob,
+  DocumentIngestionJobResponse,
+  DocumentIngestionStage,
+  DocumentUploadTicket,
   ProcessDocumentResponse,
+  RetryDocumentUploadResponse,
 } from '@/lib/documents/contracts';
 import type { IndexedDocument } from '@/lib/rag/local-search';
 import { createClient } from '@/lib/supabase/client';
 import { DOCUMENT_BUCKET } from './validation';
 
-export type DocumentUploadStage =
-  | 'creating'
-  | 'uploading'
-  | 'parsing'
-  | 'indexing'
-  | 'ready';
+export type DocumentUploadStage = 'creating' | DocumentIngestionStage;
 
 export type DocumentUploadProgress = {
   stage: DocumentUploadStage;
   documentId?: string;
+  jobId?: string;
   versionId?: string;
 };
 
@@ -37,21 +37,61 @@ async function responseJson<T extends object>(response: Response) {
   return payload as T;
 }
 
-async function markMissingUploadAsFailed(documentId: string, versionId: string) {
-  await fetch(`/api/documents/${encodeURIComponent(documentId)}/process`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ versionId }),
-  }).catch(() => undefined);
-}
-
 function wait(milliseconds: number) {
   return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
 }
 
+function progressFromTicket(
+  stage: DocumentUploadStage,
+  ticket: Pick<DocumentUploadTicket, 'documentId' | 'jobId' | 'versionId'>,
+): DocumentUploadProgress {
+  return {
+    stage,
+    documentId: ticket.documentId,
+    jobId: ticket.jobId,
+    versionId: ticket.versionId,
+  };
+}
+
+async function uploadOriginal(
+  file: File,
+  ticket: DocumentUploadTicket,
+  { upsert = false }: { upsert?: boolean } = {},
+) {
+  const normalizedFile = file.type === ticket.mimeType
+    ? file
+    : new File([file], file.name, {
+        type: ticket.mimeType,
+        lastModified: file.lastModified,
+      });
+  const supabase = createClient();
+  return supabase.storage
+    .from(DOCUMENT_BUCKET)
+    .uploadToSignedUrl(ticket.storagePath, ticket.uploadToken, normalizedFile, {
+      cacheControl: '3600',
+      contentType: ticket.mimeType,
+      upsert,
+    });
+}
+
+async function markMissingUploadAsFailed(ticket: DocumentUploadTicket) {
+  await fetch(`/api/documents/${encodeURIComponent(ticket.documentId)}/process`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ versionId: ticket.versionId, jobId: ticket.jobId }),
+  }).catch(() => undefined);
+}
+
+export async function fetchDocumentIngestionJob(jobId: string) {
+  const response = await fetch(`/api/ingestion-jobs/${encodeURIComponent(jobId)}`, {
+    cache: 'no-store',
+  });
+  const payload = await responseJson<DocumentIngestionJobResponse>(response);
+  return payload.job;
+}
+
 async function pollProcessingStatus(
-  documentId: string,
-  versionId: string,
+  ticket: Pick<DocumentUploadTicket, 'documentId' | 'jobId' | 'versionId'>,
   shouldStop: () => boolean,
   onProgress?: (progress: DocumentUploadProgress) => void,
 ) {
@@ -60,19 +100,38 @@ async function pollProcessingStatus(
     if (shouldStop()) return;
 
     try {
-      const response = await fetch(
-        `/api/documents/${encodeURIComponent(documentId)}/process?versionId=${encodeURIComponent(versionId)}`,
-        { cache: 'no-store' },
-      );
-      if (!response.ok) continue;
-      const payload = await response.json() as DocumentProcessingStatusResponse;
-      if (payload.status === 'parsing' || payload.status === 'indexing') {
-        onProgress?.({ stage: payload.status, documentId, versionId });
-      }
-      if (payload.status === 'ready' || payload.status === 'failed') return;
+      const job = await fetchDocumentIngestionJob(ticket.jobId);
+      onProgress?.(progressFromTicket(job.stage, ticket));
+      if (job.status === 'ready' || job.status === 'failed') return;
     } catch {
       // 상태 조회 실패는 실제 처리 요청 결과로 판정합니다.
     }
+  }
+}
+
+export async function processStoredDocument(
+  ticket: Pick<DocumentUploadTicket, 'documentId' | 'jobId' | 'versionId'>,
+  onProgress?: (progress: DocumentUploadProgress) => void,
+): Promise<IndexedDocument> {
+  onProgress?.(progressFromTicket('parsing', ticket));
+  let stopPolling = false;
+  const statusPolling = pollProcessingStatus(ticket, () => stopPolling, onProgress);
+
+  try {
+    const processResponse = await fetch(
+      `/api/documents/${encodeURIComponent(ticket.documentId)}/process`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ versionId: ticket.versionId, jobId: ticket.jobId }),
+      },
+    );
+    const processed = await responseJson<ProcessDocumentResponse>(processResponse);
+    onProgress?.(progressFromTicket('ready', ticket));
+    return processed.document;
+  } finally {
+    stopPolling = true;
+    await statusPolling;
   }
 }
 
@@ -80,6 +139,7 @@ export async function uploadAndProcessDocument(
   file: File,
   folderId: string | null = null,
   onProgress?: (progress: DocumentUploadProgress) => void,
+  retryOfJobId: string | null = null,
 ): Promise<IndexedDocument> {
   onProgress?.({ stage: 'creating' });
   const createResponse = await fetch('/api/documents', {
@@ -90,65 +150,58 @@ export async function uploadAndProcessDocument(
       mimeType: file.type,
       sizeBytes: file.size,
       folderId,
+      retryOfJobId,
     }),
   });
   const { upload } = await responseJson<CreateDocumentUploadResponse>(createResponse);
-  onProgress?.({
-    stage: 'uploading',
-    documentId: upload.documentId,
-    versionId: upload.versionId,
-  });
-  const normalizedFile = file.type === upload.mimeType
-    ? file
-    : new File([file], file.name, {
-        type: upload.mimeType,
-        lastModified: file.lastModified,
-      });
-  const supabase = createClient();
-  const { error: uploadError } = await supabase.storage
-    .from(DOCUMENT_BUCKET)
-    .uploadToSignedUrl(upload.storagePath, upload.uploadToken, normalizedFile, {
-      cacheControl: '3600',
-      contentType: upload.mimeType,
-      upsert: false,
-    });
+  onProgress?.(progressFromTicket('uploading', upload));
+  const { error: uploadError } = await uploadOriginal(file, upload);
 
   if (uploadError) {
-    await markMissingUploadAsFailed(upload.documentId, upload.versionId);
+    await markMissingUploadAsFailed(upload);
     throw new Error('Supabase 원본 업로드에 실패했습니다.');
   }
 
-  onProgress?.({
-    stage: 'parsing',
-    documentId: upload.documentId,
-    versionId: upload.versionId,
-  });
-  let stopPolling = false;
-  const statusPolling = pollProcessingStatus(
-    upload.documentId,
-    upload.versionId,
-    () => stopPolling,
-    onProgress,
-  );
+  return processStoredDocument(upload, onProgress);
+}
 
-  try {
-    const processResponse = await fetch(
-      `/api/documents/${encodeURIComponent(upload.documentId)}/process`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ versionId: upload.versionId }),
-      },
-    );
-    const processed = await responseJson<ProcessDocumentResponse>(processResponse);
-    onProgress?.({
-      stage: 'ready',
-      documentId: upload.documentId,
-      versionId: upload.versionId,
-    });
-    return processed.document;
-  } finally {
-    stopPolling = true;
-    await statusPolling;
+export async function retryUploadedDocument(
+  job: DocumentIngestionJob,
+  onProgress?: (progress: DocumentUploadProgress) => void,
+) {
+  if (!job.documentId || !job.versionId) {
+    throw new Error('원본 파일을 다시 선택해야 합니다.');
   }
+  return processStoredDocument({
+    documentId: job.documentId,
+    jobId: job.id,
+    versionId: job.versionId,
+  }, onProgress);
+}
+
+export async function reuploadAndProcessDocument(
+  job: DocumentIngestionJob,
+  file: File,
+  onProgress?: (progress: DocumentUploadProgress) => void,
+) {
+  const response = await fetch(
+    `/api/ingestion-jobs/${encodeURIComponent(job.id)}/retry-upload`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: file.name,
+        mimeType: file.type,
+        sizeBytes: file.size,
+      }),
+    },
+  );
+  const { upload } = await responseJson<RetryDocumentUploadResponse>(response);
+  onProgress?.(progressFromTicket('uploading', upload));
+  const { error: uploadError } = await uploadOriginal(file, upload, { upsert: true });
+  if (uploadError) {
+    await markMissingUploadAsFailed(upload);
+    throw new Error('Supabase 원본 재업로드에 실패했습니다.');
+  }
+  return processStoredDocument(upload, onProgress);
 }

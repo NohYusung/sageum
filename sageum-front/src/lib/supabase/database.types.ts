@@ -121,6 +121,91 @@ export type Database = {
           },
         ];
       };
+      document_ingestion_jobs: {
+        Row: {
+          attempts: number;
+          completed_at: string | null;
+          created_at: string;
+          document_id: string | null;
+          file_name: string;
+          folder_id: string | null;
+          id: string;
+          last_error: string | null;
+          mime_type: string;
+          original_available: boolean;
+          owner_id: string;
+          retry_of_job_id: string | null;
+          size_bytes: number;
+          stage: string;
+          started_at: string | null;
+          status: string;
+          updated_at: string;
+          version_id: string | null;
+        };
+        Insert: {
+          attempts?: number;
+          completed_at?: string | null;
+          created_at?: string;
+          document_id?: string | null;
+          file_name: string;
+          folder_id?: string | null;
+          id?: string;
+          last_error?: string | null;
+          mime_type: string;
+          original_available?: boolean;
+          owner_id: string;
+          retry_of_job_id?: string | null;
+          size_bytes: number;
+          stage?: string;
+          started_at?: string | null;
+          status?: string;
+          updated_at?: string;
+          version_id?: string | null;
+        };
+        Update: {
+          attempts?: number;
+          completed_at?: string | null;
+          created_at?: string;
+          document_id?: string | null;
+          file_name?: string;
+          folder_id?: string | null;
+          id?: string;
+          last_error?: string | null;
+          mime_type?: string;
+          original_available?: boolean;
+          owner_id?: string;
+          retry_of_job_id?: string | null;
+          size_bytes?: number;
+          stage?: string;
+          started_at?: string | null;
+          status?: string;
+          updated_at?: string;
+          version_id?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'document_ingestion_jobs_document_id_fkey';
+            columns: ['document_id'];
+            isOneToOne: false;
+            referencedRelation: 'documents';
+            referencedColumns: ['id'];
+          },
+          {
+            foreignKeyName: 'document_ingestion_jobs_retry_of_job_id_fkey';
+            columns: ['retry_of_job_id'];
+            isOneToOne: false;
+            referencedRelation: 'document_ingestion_jobs';
+            referencedColumns: ['id'];
+          },
+          {
+            foreignKeyName: 'document_ingestion_jobs_version_id_fkey';
+            columns: ['version_id'];
+            isOneToOne: true;
+            referencedRelation: 'document_versions';
+            referencedColumns: ['id'];
+          },
+        ];
+      };
       document_versions: {
         Row: {
           content_hash: string | null;
@@ -264,6 +349,28 @@ export type Database = {
       [_ in never]: never;
     };
     Functions: {
+      claim_document_ingestion_processing: {
+        Args: {
+          p_document_id: string;
+          p_job_id: string;
+          p_version_id: string;
+        };
+        Returns: {
+          attempts: number;
+          document_id: string;
+          job_id: string;
+          version_id: string;
+        }[];
+      };
+      claim_document_ingestion_reupload: {
+        Args: { p_job_id: string };
+        Returns: {
+          attempts: number;
+          document_id: string;
+          job_id: string;
+          version_id: string;
+        }[];
+      };
       complete_document_deletion: {
         Args: { p_document_id: string; p_job_id: string };
         Returns: undefined;

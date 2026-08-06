@@ -5,6 +5,7 @@ import {
   Bot,
   CheckCircle2,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   Cloud,
   Database,
@@ -50,6 +51,9 @@ import {
 import { logoutAction } from '@/app/actions';
 import { deleteStoredDocument } from '@/lib/documents/browser-delete';
 import {
+  fetchDocumentIngestionJob,
+  reuploadAndProcessDocument,
+  retryUploadedDocument,
   uploadAndProcessDocument,
   type DocumentUploadProgress,
   type DocumentUploadStage,
@@ -75,6 +79,8 @@ import {
 import type { Folder as RepositoryFolder } from '@/lib/folders/types';
 import type {
   ApiErrorResponse,
+  DocumentIngestionJob,
+  DocumentIngestionStatus,
   SearchDocumentsResponse,
 } from '@/lib/documents/contracts';
 import { shouldSubmitChatOnEnter } from '@/lib/rag/chat-keyboard';
@@ -101,19 +107,14 @@ type ChatMessage = {
   sources?: SourceReference[];
 };
 
-type UploadJob = {
+type UploadJob = Omit<DocumentIngestionJob, 'id' | 'stage'> & {
   id: string;
-  fileName: string;
-  mimeType: string;
-  sizeBytes: number;
-  stage: 'queued' | DocumentUploadStage;
-  state: 'running' | 'ready' | 'failed';
-  documentId?: string;
-  versionId?: string;
-  error?: string;
-  startedAt: string;
-  completedAt?: string;
+  jobId: string | null;
+  stage: DocumentUploadStage;
 };
+type UploadJobFilter = 'all' | 'running' | 'ready' | 'failed';
+const UPLOAD_PAGE_SIZES = [10, 30, 50] as const;
+type UploadPageSize = (typeof UPLOAD_PAGE_SIZES)[number];
 
 type SystemStatus = {
   mode: 'cloud' | 'local-demo';
@@ -169,16 +170,35 @@ const UPLOAD_STAGE_LABELS: Record<UploadJob['stage'], string> = {
   queued: '처리 대기 중',
   creating: '업로드 준비 중',
   uploading: 'Supabase 원본 업로드 중',
-  parsing: '구조 추출 · OCR · 청킹 중',
+  parsing: '문서 구조 추출 중',
+  ocr: '문서 이미지 OCR 중',
+  chunking: '검색 청크 생성 중',
   indexing: 'Qdrant 벡터 색인 중',
   ready: '문서 등록 완료',
+  failed: '처리 실패',
 };
 
 function uploadStageStep(stage: UploadJob['stage']) {
-  if (stage === 'parsing') return 1;
+  if (stage === 'parsing' || stage === 'ocr' || stage === 'chunking') return 1;
   if (stage === 'indexing') return 2;
   if (stage === 'ready') return 3;
   return 0;
+}
+
+function uploadJobFromRecord(job: DocumentIngestionJob): UploadJob {
+  return { ...job, id: job.id, jobId: job.id };
+}
+
+function uploadJobStatusForStage(stage: DocumentUploadStage): DocumentIngestionStatus {
+  if (stage === 'ready') return 'ready';
+  if (stage === 'failed') return 'failed';
+  if (stage === 'uploading') return 'uploading';
+  if (stage === 'queued' || stage === 'creating') return 'queued';
+  return 'processing';
+}
+
+function uploadJobClass(job: UploadJob) {
+  return job.status === 'ready' || job.status === 'failed' ? job.status : 'running';
 }
 
 function SageumMark() {
@@ -468,10 +488,12 @@ export function DocumentRagApp({
   userEmail,
   initialDocuments,
   initialFolders,
+  initialIngestionJobs,
 }: {
   userEmail: string;
   initialDocuments: IndexedDocument[];
   initialFolders: RepositoryFolder[];
+  initialIngestionJobs: DocumentIngestionJob[];
 }) {
   const [view, setView] = useState<View>('chat');
   const [documents, setDocuments] = useState<IndexedDocument[]>(() => initialDocuments);
@@ -494,7 +516,14 @@ export function DocumentRagApp({
   const [activeSources, setActiveSources] = useState<SourceReference[]>([]);
   const [uploadMessage, setUploadMessage] = useState<string | null>(null);
   const [uploadBusy, setUploadBusy] = useState(false);
-  const [uploadJobs, setUploadJobs] = useState<UploadJob[]>([]);
+  const [uploadJobs, setUploadJobs] = useState<UploadJob[]>(() => (
+    initialIngestionJobs.map(uploadJobFromRecord)
+  ));
+  const [uploadJobFilter, setUploadJobFilter] = useState<UploadJobFilter>('all');
+  const [uploadPageSize, setUploadPageSize] = useState<UploadPageSize>(10);
+  const [uploadPage, setUploadPage] = useState(1);
+  const [retryingUploadJobId, setRetryingUploadJobId] = useState<string | null>(null);
+  const [retryFileJobId, setRetryFileJobId] = useState<string | null>(null);
   const [deletingDocumentId, setDeletingDocumentId] = useState<string | null>(null);
   const [documentActionError, setDocumentActionError] = useState<{
     documentId: string;
@@ -503,6 +532,7 @@ export function DocumentRagApp({
   const [searchBusy, setSearchBusy] = useState(false);
   const [system, setSystem] = useState<SystemStatus | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const retryFileInputRef = useRef<HTMLInputElement | null>(null);
   const conversationRef = useRef<HTMLDivElement | null>(null);
   const documentLayoutRef = useRef<HTMLDivElement | null>(null);
   const sourceModalRef = useRef<HTMLElement | null>(null);
@@ -633,10 +663,24 @@ export function DocumentRagApp({
     [documents],
   );
   const uploadJobSummary = useMemo(() => ({
-    running: uploadJobs.filter((job) => job.state === 'running').length,
-    ready: uploadJobs.filter((job) => job.state === 'ready').length,
-    failed: uploadJobs.filter((job) => job.state === 'failed').length,
+    running: uploadJobs.filter((job) => !['ready', 'failed'].includes(job.status)).length,
+    ready: uploadJobs.filter((job) => job.status === 'ready').length,
+    failed: uploadJobs.filter((job) => job.status === 'failed').length,
   }), [uploadJobs]);
+  const filteredUploadJobs = useMemo(() => {
+    if (uploadJobFilter === 'all') return uploadJobs;
+    if (uploadJobFilter === 'running') {
+      return uploadJobs.filter((job) => !['ready', 'failed'].includes(job.status));
+    }
+    return uploadJobs.filter((job) => job.status === uploadJobFilter);
+  }, [uploadJobFilter, uploadJobs]);
+  const uploadPageCount = Math.max(1, Math.ceil(filteredUploadJobs.length / uploadPageSize));
+  const currentUploadPage = Math.min(uploadPage, uploadPageCount);
+  const uploadPageStart = (currentUploadPage - 1) * uploadPageSize;
+  const paginatedUploadJobs = filteredUploadJobs.slice(
+    uploadPageStart,
+    uploadPageStart + uploadPageSize,
+  );
   const filteredDocuments = useMemo(() => {
     const term = documentFilter.trim().toLocaleLowerCase('ko-KR');
     const currentDocuments = documentsInFolderScope(documents, folders, selectedFolderId);
@@ -745,6 +789,37 @@ export function DocumentRagApp({
     )));
   }
 
+  function applyUploadProgress(clientJobId: string, progress: DocumentUploadProgress) {
+    updateUploadJob(clientJobId, {
+      stage: progress.stage,
+      status: uploadJobStatusForStage(progress.stage),
+      ...(progress.jobId ? { jobId: progress.jobId } : {}),
+      ...(progress.documentId ? { documentId: progress.documentId } : {}),
+      ...(progress.versionId ? { versionId: progress.versionId } : {}),
+      lastError: null,
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
+  async function syncUploadJob(clientJobId: string, persistedJobId: string) {
+    const persisted = await fetchDocumentIngestionJob(persistedJobId);
+    setUploadJobs((current) => current.map((job) => (
+      job.id === clientJobId
+        ? { ...uploadJobFromRecord(persisted), id: clientJobId }
+        : job
+    )));
+    return persisted;
+  }
+
+  function storeProcessedDocument(document: IndexedDocument) {
+    setDocuments((current) => [
+      document,
+      ...current.filter(({ document: currentDocument }) => (
+        currentDocument.id !== document.document.id
+      )),
+    ]);
+  }
+
   function openUploadedDocument(documentId: string) {
     const uploaded = documents.find(({ document }) => document.id === documentId);
     if (!uploaded) return;
@@ -753,22 +828,38 @@ export function DocumentRagApp({
     setView('documents');
   }
 
-  async function handleFiles(fileList: FileList | File[], folderId = selectedFolderId) {
+  async function handleFiles(
+    fileList: FileList | File[],
+    folderId = selectedFolderId,
+    retryOfJobId: string | null = null,
+  ) {
     const files = Array.from(fileList);
     if (!files.length) return;
     const jobs = files.map((file) => {
       const id = crypto.randomUUID();
+      const now = new Date().toISOString();
       return {
         id,
         file,
         progress: {
           id,
+          jobId: null,
+          documentId: null,
+          versionId: null,
+          retryOfJobId,
+          folderId,
           fileName: file.name,
           mimeType: file.type,
           sizeBytes: file.size,
           stage: 'queued',
-          state: 'running',
-          startedAt: new Date().toISOString(),
+          status: 'queued',
+          attempts: 1,
+          originalAvailable: false,
+          lastError: null,
+          startedAt: null,
+          completedAt: null,
+          createdAt: now,
+          updatedAt: now,
         } satisfies UploadJob,
       };
     });
@@ -779,37 +870,36 @@ export function DocumentRagApp({
 
     const results = await Promise.allSettled(
       jobs.map(async ({ id, file }) => {
+        let persistedJobId: string | null = null;
         try {
           const document = await uploadAndProcessDocument(
             file,
             folderId,
-            (progress: DocumentUploadProgress) => updateUploadJob(id, {
-              stage: progress.stage,
-              documentId: progress.documentId,
-              versionId: progress.versionId,
-            }),
+            (progress: DocumentUploadProgress) => {
+              if (progress.jobId) persistedJobId = progress.jobId;
+              applyUploadProgress(id, progress);
+            },
+            retryOfJobId,
           );
-          updateUploadJob(id, {
-            stage: 'ready',
-            state: 'ready',
-            documentId: document.document.id,
-            versionId: document.document.versionId,
-            completedAt: new Date().toISOString(),
-          });
-          setDocuments((current) => [
-            document,
-            ...current.filter(({ document: currentDocument }) => (
-              currentDocument.id !== document.document.id
-            )),
-          ]);
+          storeProcessedDocument(document);
+          if (persistedJobId) await syncUploadJob(id, persistedJobId);
           return document;
         } catch (error) {
           const message = error instanceof Error ? error.message : '파일 처리에 실패했습니다.';
-          updateUploadJob(id, {
-            state: 'failed',
-            error: message,
-            completedAt: new Date().toISOString(),
-          });
+          if (persistedJobId) {
+            await syncUploadJob(id, persistedJobId).catch(() => updateUploadJob(id, {
+              status: 'failed',
+              lastError: message,
+              completedAt: new Date().toISOString(),
+            }));
+          } else {
+            updateUploadJob(id, {
+              status: 'failed',
+              stage: 'failed',
+              lastError: message,
+              completedAt: new Date().toISOString(),
+            });
+          }
           throw error;
         }
       }),
@@ -834,6 +924,86 @@ export function DocumentRagApp({
       setUploadMessage(`실패: ${failures.join(' ')}`);
     }
     setUploadBusy(false);
+  }
+
+  async function retryPersistentUploadJob(job: UploadJob, file?: File) {
+    if (!job.jobId || job.stage === 'creating') return;
+    const persistedJob: DocumentIngestionJob = {
+      id: job.jobId,
+      documentId: job.documentId,
+      versionId: job.versionId,
+      retryOfJobId: job.retryOfJobId,
+      folderId: job.folderId,
+      fileName: job.fileName,
+      mimeType: job.mimeType,
+      sizeBytes: job.sizeBytes,
+      status: job.status,
+      stage: job.stage,
+      attempts: job.attempts,
+      originalAvailable: job.originalAvailable,
+      lastError: job.lastError,
+      startedAt: job.startedAt,
+      completedAt: job.completedAt,
+      createdAt: job.createdAt,
+      updatedAt: job.updatedAt,
+    };
+
+    setRetryingUploadJobId(job.id);
+    setUploadMessage(null);
+    updateUploadJob(job.id, {
+      status: file ? 'uploading' : 'processing',
+      stage: file ? 'uploading' : 'parsing',
+      attempts: job.attempts + 1,
+      lastError: null,
+      completedAt: null,
+    });
+
+    try {
+      const document = file
+        ? await reuploadAndProcessDocument(
+            persistedJob,
+            file,
+            (progress) => applyUploadProgress(job.id, progress),
+          )
+        : await retryUploadedDocument(
+            persistedJob,
+            (progress) => applyUploadProgress(job.id, progress),
+          );
+      storeProcessedDocument(document);
+      await syncUploadJob(job.id, job.jobId);
+      setUploadMessage('문서를 다시 처리하고 검색 인덱스를 갱신했습니다.');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '문서 재시도에 실패했습니다.';
+      await syncUploadJob(job.id, job.jobId).catch(() => updateUploadJob(job.id, {
+        status: 'failed',
+        lastError: message,
+        completedAt: new Date().toISOString(),
+      }));
+      setUploadMessage(`실패: ${message}`);
+    } finally {
+      setRetryingUploadJobId(null);
+    }
+  }
+
+  function handleRetryUploadJob(job: UploadJob) {
+    if (retryingUploadJobId) return;
+    if (job.originalAvailable && job.documentId && job.versionId) {
+      void retryPersistentUploadJob(job);
+      return;
+    }
+    setRetryFileJobId(job.id);
+    retryFileInputRef.current?.click();
+  }
+
+  function handleRetryFile(file: File) {
+    const job = uploadJobs.find((candidate) => candidate.id === retryFileJobId);
+    setRetryFileJobId(null);
+    if (!job) return;
+    if (job.jobId && job.documentId && job.versionId && !job.originalAvailable) {
+      void retryPersistentUploadJob(job, file);
+      return;
+    }
+    void handleFiles([file], job.folderId, job.jobId);
   }
 
   function selectFolder(folderId: string | null) {
@@ -1668,37 +1838,40 @@ export function DocumentRagApp({
             </header>
 
             <div className="upload-status-content">
-              <section className="upload-status-summary" aria-label="파일 처리 요약">
-                <div className="running">
-                  <span>진행 중</span>
-                  <strong>{uploadJobSummary.running}</strong>
-                </div>
-                <div className="ready">
-                  <span>완료</span>
-                  <strong>{uploadJobSummary.ready}</strong>
-                </div>
-                <div className="failed">
-                  <span>실패</span>
-                  <strong>{uploadJobSummary.failed}</strong>
-                </div>
+              <section className="upload-status-summary" aria-label="처리 상태 필터">
+                {([
+                  ['all', '전체', uploadJobs.length],
+                  ['running', '진행 중', uploadJobSummary.running],
+                  ['ready', '완료', uploadJobSummary.ready],
+                  ['failed', '실패', uploadJobSummary.failed],
+                ] as const).map(([filter, label, count]) => (
+                  <button
+                    aria-pressed={uploadJobFilter === filter}
+                    className={`${filter}${uploadJobFilter === filter ? ' active' : ''}`}
+                    key={filter}
+                    type="button"
+                    onClick={() => {
+                      setUploadJobFilter(filter);
+                      setUploadPage(1);
+                    }}
+                  >
+                    <span>{label}</span>
+                    <strong>{count}</strong>
+                  </button>
+                ))}
               </section>
 
               <div className="upload-status-heading">
                 <div>
                   <span className="eyebrow">FILES</span>
                   <h2>파일별 처리 단계</h2>
-                  <p>현재 브라우저에서 등록한 파일의 업로드·구조 추출·벡터 색인 상태입니다.</p>
+                  <p>현재 계정에서 등록한 전체 업로드 이력과 재시도 상태입니다.</p>
                 </div>
-                {uploadJobs.some((job) => job.state !== 'running') ? (
-                  <button
-                    type="button"
-                    onClick={() => setUploadJobs((current) => (
-                      current.filter((job) => job.state === 'running')
-                    ))}
-                  >
-                    완료 내역 지우기
-                  </button>
-                ) : null}
+                <span className="upload-history-count">
+                  {uploadJobFilter === 'all'
+                    ? `총 ${uploadJobs.length}건`
+                    : `${filteredUploadJobs.length} / ${uploadJobs.length}건`}
+                </span>
               </div>
 
               {uploadMessage ? (
@@ -1712,15 +1885,16 @@ export function DocumentRagApp({
               ) : null}
 
               <div className="upload-job-list" aria-live="polite">
-                {uploadJobs.map((job) => {
+                {paginatedUploadJobs.map((job) => {
                   const currentStep = uploadStageStep(job.stage);
+                  const jobClass = uploadJobClass(job);
                   return (
-                    <article className={`upload-job ${job.state}`} key={job.id}>
+                    <article className={`upload-job ${jobClass}`} key={job.id}>
                       <div className="upload-job-file">
                         <span className="upload-job-icon">
-                          {job.state === 'failed' ? (
+                          {job.status === 'failed' ? (
                             <XCircle size={20} />
-                          ) : job.state === 'ready' ? (
+                          ) : job.status === 'ready' ? (
                             <CheckCircle2 size={20} />
                           ) : (
                             <LoaderCircle size={20} className="spin" />
@@ -1729,17 +1903,22 @@ export function DocumentRagApp({
                         <div>
                           <strong title={job.fileName}>{job.fileName}</strong>
                           <span>
-                            {formatBytes(job.sizeBytes)} · {formatDate(job.startedAt)}
+                            {formatBytes(job.sizeBytes)} · {formatDate(job.createdAt)} · {job.attempts}회 시도
+                            {!job.documentId ? ' · 문서 삭제됨' : ''}
                           </span>
                         </div>
-                        <em>{job.state === 'failed' ? '실패' : UPLOAD_STAGE_LABELS[job.stage]}</em>
+                        <em>
+                          {job.status === 'failed'
+                            ? `실패 · ${UPLOAD_STAGE_LABELS[job.stage]}`
+                            : UPLOAD_STAGE_LABELS[job.stage]}
+                        </em>
                       </div>
 
                       <ol className="upload-job-steps" aria-label={`${job.fileName} 처리 단계`}>
                         {UPLOAD_STEPS.map((step, index) => {
-                          const stepState = job.state === 'failed' && index === currentStep
+                          const stepState = job.status === 'failed' && index === currentStep
                             ? 'failed'
-                            : job.state === 'ready' || index < currentStep
+                            : job.status === 'ready' || index < currentStep
                               ? 'done'
                               : index === currentStep
                                 ? 'active'
@@ -1753,17 +1932,36 @@ export function DocumentRagApp({
                         })}
                       </ol>
 
-                      {job.error ? <p className="upload-job-error">{job.error}</p> : null}
-                      {job.state === 'ready' && job.documentId ? (
-                        <button
-                          className="upload-job-open"
-                          type="button"
-                          onClick={() => openUploadedDocument(job.documentId!)}
-                        >
-                          문서 열기
-                          <ChevronRight size={14} />
-                        </button>
-                      ) : null}
+                      {job.lastError ? <p className="upload-job-error">{job.lastError}</p> : null}
+                      <div className="upload-job-actions">
+                        {job.status === 'failed' ? (
+                          <button
+                            className="upload-job-retry"
+                            type="button"
+                            disabled={retryingUploadJobId !== null}
+                            onClick={() => handleRetryUploadJob(job)}
+                          >
+                            {retryingUploadJobId === job.id ? (
+                              <LoaderCircle size={14} className="spin" />
+                            ) : (
+                              <UploadCloud size={14} />
+                            )}
+                            {job.originalAvailable && job.documentId && job.versionId
+                              ? '다시 처리'
+                              : '파일 선택 후 재시도'}
+                          </button>
+                        ) : null}
+                        {job.status === 'ready' && job.documentId ? (
+                          <button
+                            className="upload-job-open"
+                            type="button"
+                            onClick={() => openUploadedDocument(job.documentId!)}
+                          >
+                            문서 열기
+                            <ChevronRight size={14} />
+                          </button>
+                        ) : null}
+                      </div>
                     </article>
                   );
                 })}
@@ -1775,7 +1973,81 @@ export function DocumentRagApp({
                     <button type="button" onClick={() => setView('upload')}>문서 추가하기</button>
                   </div>
                 ) : null}
+                {uploadJobs.length && !filteredUploadJobs.length ? (
+                  <div className="upload-job-empty upload-job-filter-empty">
+                    <ListChecks size={28} />
+                    <strong>해당 상태의 처리 이력이 없습니다</strong>
+                    <span>다른 상태를 선택하거나 전체 이력으로 돌아가세요.</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setUploadJobFilter('all');
+                        setUploadPage(1);
+                      }}
+                    >
+                      전체 이력 보기
+                    </button>
+                  </div>
+                ) : null}
               </div>
+              {filteredUploadJobs.length ? (
+                <nav className="upload-pagination" aria-label="처리 이력 페이지">
+                  <div className="upload-pagination-meta">
+                    <label className="upload-page-size">
+                      <span>페이지당</span>
+                      <select
+                        aria-label="페이지당 처리 이력 개수"
+                        value={uploadPageSize}
+                        onChange={(event) => {
+                          setUploadPageSize(Number(event.target.value) as UploadPageSize);
+                          setUploadPage(1);
+                        }}
+                      >
+                        {UPLOAD_PAGE_SIZES.map((size) => (
+                          <option key={size} value={size}>{size}개</option>
+                        ))}
+                      </select>
+                      <ChevronDown size={13} aria-hidden="true" />
+                    </label>
+                    <span>
+                      {uploadPageStart + 1}–{Math.min(
+                        uploadPageStart + uploadPageSize,
+                        filteredUploadJobs.length,
+                      )} / {filteredUploadJobs.length}건
+                    </span>
+                  </div>
+                  <div className="upload-pagination-controls">
+                    <button
+                      aria-label="이전 페이지"
+                      type="button"
+                      disabled={currentUploadPage === 1}
+                      onClick={() => setUploadPage(currentUploadPage - 1)}
+                    >
+                      <ChevronLeft size={15} />
+                    </button>
+                    <strong>{currentUploadPage} / {uploadPageCount}</strong>
+                    <button
+                      aria-label="다음 페이지"
+                      type="button"
+                      disabled={currentUploadPage === uploadPageCount}
+                      onClick={() => setUploadPage(currentUploadPage + 1)}
+                    >
+                      <ChevronRight size={15} />
+                    </button>
+                  </div>
+                </nav>
+              ) : null}
+              <input
+                className="retry-upload-input"
+                ref={retryFileInputRef}
+                type="file"
+                accept=".md,.markdown,.html,.htm,.txt,.pdf,.docx,.xlsx"
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  if (file) handleRetryFile(file);
+                  event.target.value = '';
+                }}
+              />
             </div>
           </section>
         ) : null}

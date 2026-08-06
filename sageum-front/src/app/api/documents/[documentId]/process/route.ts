@@ -20,7 +20,7 @@ import {
   QdrantInferenceError,
 } from '@/lib/server/qdrant-store';
 import { enrichDocumentWithVisualOcr, VISUAL_OCR_VERSION } from '@/lib/server/visual-ocr';
-import type { TablesInsert } from '@/lib/supabase/database.types';
+import type { TablesInsert, TablesUpdate } from '@/lib/supabase/database.types';
 
 export const runtime = 'nodejs';
 
@@ -31,6 +31,21 @@ class ProcessingError extends Error {
     super(message);
     this.name = 'ProcessingError';
   }
+}
+
+type AuthenticatedContext = NonNullable<Awaited<ReturnType<typeof getAuthenticatedRequestContext>>>;
+
+async function updateIngestionJob(
+  context: AuthenticatedContext,
+  jobId: string,
+  values: TablesUpdate<'document_ingestion_jobs'>,
+) {
+  const { error } = await context.supabase
+    .from('document_ingestion_jobs')
+    .update({ ...values, updated_at: new Date().toISOString() })
+    .eq('id', jobId)
+    .eq('owner_id', context.ownerId);
+  if (error) throw new ProcessingError('문서 처리 이력을 갱신하지 못했습니다.');
 }
 
 const PROCESSING_STATUSES = new Set<DocumentProcessingStatus>([
@@ -88,14 +103,20 @@ export async function POST(
 
   const { documentId } = await params;
   let versionId = '';
+  let requestedJobId = '';
   try {
-    const body = await request.json() as { versionId?: unknown };
+    const body = await request.json() as { versionId?: unknown; jobId?: unknown };
     versionId = typeof body.versionId === 'string' ? body.versionId : '';
+    requestedJobId = typeof body.jobId === 'string' ? body.jobId : '';
   } catch {
     return Response.json({ error: '올바른 JSON 요청이 필요합니다.' }, { status: 400 });
   }
 
-  if (!UUID_PATTERN.test(documentId) || !UUID_PATTERN.test(versionId)) {
+  if (
+    !UUID_PATTERN.test(documentId)
+    || !UUID_PATTERN.test(versionId)
+    || (requestedJobId && !UUID_PATTERN.test(requestedJobId))
+  ) {
     return Response.json({ error: '올바른 문서 식별자가 필요합니다.' }, { status: 400 });
   }
 
@@ -131,6 +152,39 @@ export async function POST(
     return Response.json({ error: '문서 저장 경로가 올바르지 않습니다.' }, { status: 403 });
   }
 
+
+  let jobId = requestedJobId;
+  if (!jobId) {
+    const { data: ingestionJob, error: ingestionJobError } = await context.supabase
+      .from('document_ingestion_jobs')
+      .select('id')
+      .eq('version_id', versionId)
+      .eq('owner_id', context.ownerId)
+      .maybeSingle();
+    if (ingestionJobError) {
+      return Response.json({ error: '문서 처리 이력을 조회하지 못했습니다.' }, { status: 500 });
+    }
+    if (!ingestionJob) {
+      return Response.json({ error: '문서 처리 이력을 찾을 수 없습니다.' }, { status: 409 });
+    }
+    jobId = ingestionJob.id;
+  }
+
+  const { data: claimedJobs, error: claimError } = await context.supabase.rpc(
+    'claim_document_ingestion_processing',
+    {
+      p_job_id: jobId,
+      p_document_id: documentId,
+      p_version_id: versionId,
+    },
+  );
+  if (claimError || !claimedJobs?.length) {
+    return Response.json(
+      { error: '이미 처리 중이거나 다시 시도할 수 없는 문서입니다.' },
+      { status: 409 },
+    );
+  }
+
   const startedAt = new Date().toISOString();
   const { error: parsingStatusError } = await context.supabase
     .from('document_versions')
@@ -139,21 +193,36 @@ export async function POST(
     .eq('owner_id', context.ownerId);
 
   if (parsingStatusError) {
+    const failedAt = new Date().toISOString();
+    await updateIngestionJob(context, jobId, {
+      status: 'failed',
+      stage: 'parsing',
+      last_error: '문서 처리 상태를 갱신하지 못했습니다.',
+      completed_at: failedAt,
+    }).catch((error) => console.error('Failed to close document ingestion job', error));
     return Response.json({ error: '문서 처리 상태를 갱신하지 못했습니다.' }, { status: 500 });
   }
 
   let vectorStore: ReturnType<typeof getQdrantVectorStore> | null = null;
   let vectorIndexStarted = false;
+  let originalAvailability: boolean | null = null;
   try {
     const { data: originalFile, error: downloadError } = await context.supabase.storage
       .from(DOCUMENT_BUCKET)
       .download(version.storage_path);
     if (downloadError || !originalFile) {
+      originalAvailability = false;
       throw new ProcessingError('업로드된 원본 파일을 찾을 수 없습니다.', 422);
     }
+    originalAvailability = true;
+    await updateIngestionJob(context, jobId, {
+      stage: 'parsing',
+      original_available: true,
+    });
 
     const fileBuffer = await originalFile.arrayBuffer();
     if (fileBuffer.byteLength !== version.size_bytes) {
+      originalAvailability = false;
       throw new ProcessingError('업로드된 원본 파일 크기가 요청 정보와 일치하지 않습니다.', 422);
     }
     const { document: parsedDocument, contentHash } = await parseDocumentSourceWithHash(
@@ -166,10 +235,12 @@ export async function POST(
         versionId,
       },
     );
+    await updateIngestionJob(context, jobId, { stage: 'ocr' });
     const { document: parsed, report: visualOcr } = await enrichDocumentWithVisualOcr(
       new Uint8Array(fileBuffer),
       parsedDocument,
     );
+    await updateIngestionJob(context, jobId, { stage: 'chunking' });
     const chunks = chunkDocument(parsed);
     if (!chunks.length) {
       throw new ProcessingError('검색 가능한 본문이 없는 문서입니다.', 422);
@@ -191,6 +262,7 @@ export async function POST(
       if (indexingStatusError) {
         throw new ProcessingError('문서 인덱싱 상태를 갱신하지 못했습니다.');
       }
+      await updateIngestionJob(context, jobId, { stage: 'indexing' });
 
       vectorStore = getQdrantVectorStore();
       await vectorStore.ensureCollection(providers.embedding.dimensions);
@@ -282,6 +354,14 @@ export async function POST(
       .eq('owner_id', context.ownerId);
     if (versionUpdateError) throw new ProcessingError('문서 처리 결과를 확정하지 못했습니다.');
 
+    await updateIngestionJob(context, jobId, {
+      status: 'ready',
+      stage: 'ready',
+      original_available: true,
+      last_error: null,
+      completed_at: processedAt,
+    });
+
     const indexedDocument: IndexedDocument = {
       document: {
         ...parsed,
@@ -338,6 +418,23 @@ export async function POST(
         if (versionFailureError) throw versionFailureError;
       },
     });
+    const failedAt = new Date().toISOString();
+    const { error: jobFailureError } = await context.supabase
+      .from('document_ingestion_jobs')
+      .update({
+        status: 'failed',
+        last_error: publicError.slice(0, 500),
+        completed_at: failedAt,
+        updated_at: failedAt,
+        ...(originalAvailability === null
+          ? {}
+          : { original_available: originalAvailability }),
+      })
+      .eq('id', jobId)
+      .eq('owner_id', context.ownerId);
+    if (jobFailureError) {
+      console.error('Failed to mark document ingestion job as failed', jobFailureError);
+    }
     return Response.json({ error: publicError }, { status });
   }
 }

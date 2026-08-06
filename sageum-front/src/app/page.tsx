@@ -1,6 +1,10 @@
 import { redirect } from 'next/navigation';
 import { DocumentRagApp } from '@/components/document-rag-app';
-import { listFolders, listIndexedDocuments } from '@/lib/server/document-repository';
+import {
+  listDocumentIngestionJobs,
+  listFolders,
+  listIndexedDocuments,
+} from '@/lib/server/document-repository';
 import { createClient } from '@/lib/supabase/server';
 
 export default async function Home() {
@@ -10,9 +14,10 @@ export default async function Home() {
 
   if (!claims?.sub) redirect('/login');
 
-  const [initialDocuments, initialFolders] = await Promise.all([
+  const [initialDocuments, initialFolders, initialIngestionJobs] = await Promise.all([
     listIndexedDocuments(supabase, claims.sub),
     listFolders(supabase, claims.sub),
+    listDocumentIngestionJobs(supabase, claims.sub),
   ]);
   const userEmail = typeof claims.email === 'string' ? claims.email : '로그인 사용자';
   return (
@@ -20,6 +25,7 @@ export default async function Home() {
       userEmail={userEmail}
       initialDocuments={initialDocuments}
       initialFolders={initialFolders}
+      initialIngestionJobs={initialIngestionJobs}
     />
   );
 }

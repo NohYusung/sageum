@@ -2,6 +2,7 @@ import type { IndexedDocument, SourceReference } from '@/lib/rag/local-search';
 
 export type DocumentUploadTicket = {
   documentId: string;
+  jobId: string;
   versionId: string;
   storagePath: string;
   uploadToken: string;
@@ -9,6 +10,51 @@ export type DocumentUploadTicket = {
 };
 
 export type CreateDocumentUploadResponse = {
+  upload: DocumentUploadTicket;
+};
+
+export type DocumentIngestionStatus =
+  | 'queued'
+  | 'uploading'
+  | 'processing'
+  | 'ready'
+  | 'failed';
+
+export type DocumentIngestionStage =
+  | 'queued'
+  | 'uploading'
+  | 'parsing'
+  | 'ocr'
+  | 'chunking'
+  | 'indexing'
+  | 'ready'
+  | 'failed';
+
+export type DocumentIngestionJob = {
+  id: string;
+  documentId: string | null;
+  versionId: string | null;
+  retryOfJobId: string | null;
+  folderId: string | null;
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  status: DocumentIngestionStatus;
+  stage: DocumentIngestionStage;
+  attempts: number;
+  originalAvailable: boolean;
+  lastError: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type DocumentIngestionJobResponse = {
+  job: DocumentIngestionJob;
+};
+
+export type RetryDocumentUploadResponse = {
   upload: DocumentUploadTicket;
 };
 

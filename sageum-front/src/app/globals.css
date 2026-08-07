@@ -1835,6 +1835,32 @@ svg {
   font-weight: 700;
 }
 
+.repository-bulk-delete-button {
+  display: inline-flex;
+  min-height: 31px;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 9px;
+  border: 1px solid #e3b5af;
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--danger);
+  font-size: 10px;
+  font-weight: 750;
+}
+
+.repository-bulk-delete-button:hover:not(:disabled),
+.repository-bulk-delete-button:focus-visible:not(:disabled) {
+  outline: 0;
+  background: var(--danger-soft);
+}
+
+.repository-bulk-delete-button:disabled {
+  border-color: var(--line);
+  color: var(--faint);
+  cursor: not-allowed;
+}
+
 .document-sort-select {
   display: grid;
   grid-template-columns: 14px auto minmax(92px, auto) 13px;
@@ -1887,12 +1913,12 @@ body.resizing-document-inspector * {
 }
 
 .folder-tree > button[draggable='true'],
-.repository-entry-row[draggable='true'] {
+.repository-entry-open[draggable='true'] {
   cursor: grab;
 }
 
 .folder-tree > button[draggable='true']:active,
-.repository-entry-row[draggable='true']:active {
+.repository-entry-open[draggable='true']:active {
   cursor: grabbing;
 }
 
@@ -1918,7 +1944,7 @@ body.resizing-document-inspector * {
 .repository-entry-header,
 .repository-entry-row {
   display: grid;
-  grid-template-columns: minmax(170px, 1fr) minmax(86px, .42fr) minmax(84px, .35fr) minmax(96px, .42fr) 18px;
+  grid-template-columns: 28px minmax(170px, 1fr) minmax(86px, .42fr) minmax(84px, .35fr) minmax(96px, .42fr) 18px;
   align-items: center;
   gap: 12px;
 }
@@ -1938,12 +1964,25 @@ body.resizing-document-inspector * {
 .repository-entry-row {
   width: 100%;
   min-height: 60px;
-  padding: 9px 13px;
-  border: 0;
+  padding: 0 13px;
   border-bottom: 1px solid var(--line);
   background: var(--surface);
-  text-align: left;
   transition: background 100ms ease;
+}
+
+.repository-entry-open {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  min-height: 59px;
+  grid-column: 2 / -1;
+  grid-template-columns: minmax(170px, 1fr) minmax(86px, .42fr) minmax(84px, .35fr) minmax(96px, .42fr) 18px;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
 }
 
 .repository-entry-row:last-of-type {
@@ -1951,13 +1990,37 @@ body.resizing-document-inspector * {
 }
 
 .repository-entry-row:hover,
-.repository-entry-row:focus-visible {
+.repository-entry-row:focus-within {
   background: var(--sage-pale);
+  outline: 0;
+}
+
+.repository-entry-open:focus-visible {
   outline: 0;
 }
 
 .repository-entry-row.selected {
   background: #e3ede7;
+}
+
+.repository-selection-checkbox {
+  display: grid;
+  width: 28px;
+  min-height: 28px;
+  place-items: center;
+  cursor: pointer;
+}
+
+.repository-selection-checkbox input {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--sage-dark);
+  cursor: pointer;
+}
+
+.repository-selection-checkbox input:disabled {
+  cursor: not-allowed;
 }
 
 .repository-entry-name {
@@ -2050,6 +2113,10 @@ body.resizing-document-inspector * {
 @container repository (max-width: 620px) {
   .repository-entry-header,
   .repository-entry-row {
+    grid-template-columns: 28px minmax(0, 1fr) minmax(88px, .38fr) 18px;
+  }
+
+  .repository-entry-open {
     grid-template-columns: minmax(0, 1fr) minmax(88px, .38fr) 18px;
   }
 
@@ -2076,6 +2143,10 @@ body.resizing-document-inspector * {
 
   .repository-entry-header,
   .repository-entry-row {
+    grid-template-columns: 28px minmax(0, 1fr) 18px;
+  }
+
+  .repository-entry-open {
     grid-template-columns: minmax(0, 1fr) 18px;
   }
 
@@ -2515,6 +2586,182 @@ body.resizing-document-inspector * {
   line-height: 1.65;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
+}
+
+.repository-delete-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: grid;
+  padding: 20px;
+  place-items: center;
+  background: rgb(23 31 27 / 48%);
+  backdrop-filter: blur(5px);
+}
+
+.repository-delete-modal {
+  width: min(460px, calc(100vw - 40px));
+  padding: 28px;
+  border: 1px solid rgb(255 255 255 / 58%);
+  border-radius: 16px;
+  background: var(--paper);
+  box-shadow: 0 28px 90px rgb(15 24 19 / 32%);
+  animation: repository-delete-modal-enter 150ms ease-out;
+}
+
+.repository-delete-modal-icon {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  margin-bottom: 16px;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.repository-delete-modal h2 {
+  margin: 6px 0 0;
+  font-family: var(--display);
+  font-size: 22px;
+  font-weight: 650;
+}
+
+.repository-delete-modal > p {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.65;
+}
+
+.repository-delete-summary {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  margin: 20px 0 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.repository-delete-summary > div {
+  padding: 12px;
+  border-right: 1px solid var(--line);
+}
+
+.repository-delete-summary > div:last-child {
+  border-right: 0;
+}
+
+.repository-delete-summary dt,
+.repository-delete-summary dd {
+  margin: 0;
+}
+
+.repository-delete-summary dt {
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: 8px;
+  font-weight: 750;
+  letter-spacing: .04em;
+}
+
+.repository-delete-summary dd {
+  margin-top: 5px;
+  color: var(--ink-soft);
+  font-family: var(--display);
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.repository-delete-modal .repository-delete-folder-warning,
+.repository-delete-modal .repository-delete-modal-error {
+  padding: 9px 10px;
+  border-radius: 7px;
+  font-size: 10px;
+}
+
+.repository-delete-modal .repository-delete-folder-warning {
+  border: 1px solid #e6d7b5;
+  background: var(--amber-soft);
+  color: #805e22;
+}
+
+.repository-delete-modal .repository-delete-modal-error {
+  border: 1px solid #eccdc8;
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.repository-delete-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 22px;
+}
+
+.repository-delete-modal-actions button {
+  display: inline-flex;
+  min-width: 84px;
+  min-height: 36px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 13px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.repository-delete-modal-actions button.danger {
+  border-color: var(--danger);
+  background: var(--danger);
+  color: white;
+}
+
+.repository-delete-modal-actions button:hover:not(:disabled),
+.repository-delete-modal-actions button:focus-visible:not(:disabled) {
+  outline: 0;
+  filter: brightness(.96);
+}
+
+.repository-delete-modal-actions button:disabled {
+  opacity: .6;
+  cursor: wait;
+}
+
+@keyframes repository-delete-modal-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(.985);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (max-width: 520px) {
+  .repository-delete-modal {
+    padding: 22px;
+  }
+
+  .repository-delete-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .repository-delete-summary > div {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .repository-delete-summary > div:last-child {
+    border-bottom: 0;
+  }
 }
 
 .source-document-modal-backdrop {

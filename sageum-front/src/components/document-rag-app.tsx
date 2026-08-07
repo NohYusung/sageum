@@ -51,6 +51,7 @@ import {
 import { logoutAction } from '@/app/actions';
 import {
   cleanupFailedIngestionJob,
+  deleteRepositoryItems,
   deleteStoredDocument,
 } from '@/lib/documents/browser-delete';
 import {
@@ -68,11 +69,11 @@ import {
 } from '@/lib/documents/repository-sort';
 import {
   createFolder,
-  deleteFolder,
   moveDocumentToFolder,
   moveFolder,
   renameFolder,
 } from '@/lib/folders/browser';
+import { resolveRepositoryDeletionTargets } from '@/lib/folders/deletion';
 import {
   canMoveFolder,
   documentsInFolderScope,
@@ -523,6 +524,15 @@ export function DocumentRagApp({
   const [folderActionError, setFolderActionError] = useState<string | null>(null);
   const [dragOverFolderId, setDragOverFolderId] = useState<string | null | 'root'>(null);
   const [selectedDocumentId, setSelectedDocumentId] = useState('');
+  const [selectedRepositoryDocumentIds, setSelectedRepositoryDocumentIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [selectedRepositoryFolderIds, setSelectedRepositoryFolderIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [repositoryDeleteConfirmationOpen, setRepositoryDeleteConfirmationOpen] = useState(false);
+  const [repositoryDeleteBusy, setRepositoryDeleteBusy] = useState(false);
+  const [repositoryDeleteError, setRepositoryDeleteError] = useState<string | null>(null);
   const [expandedStructureChunkId, setExpandedStructureChunkId] = useState<string | null>(null);
   const [sourcePreview, setSourcePreview] = useState<SourceReference | null>(null);
   const [inspectorWidth, setInspectorWidth] = useState(DOCUMENT_INSPECTOR_DEFAULT_WIDTH);
@@ -560,6 +570,9 @@ export function DocumentRagApp({
   const sourceModalRef = useRef<HTMLElement | null>(null);
   const sourceModalCloseRef = useRef<HTMLButtonElement | null>(null);
   const sourceModalTriggerRef = useRef<HTMLElement | null>(null);
+  const repositorySelectAllRef = useRef<HTMLInputElement | null>(null);
+  const repositoryDeleteModalRef = useRef<HTMLElement | null>(null);
+  const repositoryDeleteCancelRef = useRef<HTMLButtonElement | null>(null);
   const retryingUploadJobIdsRef = useRef<Set<string>>(new Set());
   const cleaningUploadJobIdsRef = useRef<Set<string>>(new Set());
   const userInitial = userEmail.charAt(0).toLocaleUpperCase('ko-KR') || '?';
@@ -624,6 +637,42 @@ export function DocumentRagApp({
       trigger?.focus();
     };
   }, [sourcePreview]);
+
+  useEffect(() => {
+    if (!repositoryDeleteConfirmationOpen) return;
+    const previousOverflow = document.body.style.overflow;
+    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === 'Escape' && !repositoryDeleteBusy) {
+        setRepositoryDeleteConfirmationOpen(false);
+        setRepositoryDeleteError(null);
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      const modal = repositoryDeleteModalRef.current;
+      if (!modal) return;
+      const focusable = Array.from(modal.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      ));
+      const first = focusable[0];
+      const last = focusable.at(-1);
+      if (!first || !last) return;
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.body.style.overflow = 'hidden';
+    window.addEventListener('keydown', handleKeyDown);
+    const focusFrame = window.requestAnimationFrame(() => repositoryDeleteCancelRef.current?.focus());
+    return () => {
+      window.cancelAnimationFrame(focusFrame);
+      window.removeEventListener('keydown', handleKeyDown);
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [repositoryDeleteBusy, repositoryDeleteConfirmationOpen]);
 
   useEffect(() => {
     if (view !== 'documents') return;
@@ -726,6 +775,32 @@ export function DocumentRagApp({
       : currentDocuments;
     return sortRepositoryDocuments(matchingDocuments, documentSort);
   }, [documentFilter, documentSort, documents, folders, selectedFolderId]);
+  const visibleRepositoryDocumentIds = useMemo(
+    () => filteredDocuments.map(({ document }) => document.id),
+    [filteredDocuments],
+  );
+  const visibleRepositoryFolderIds = useMemo(
+    () => filteredChildFolders.map((folder) => folder.id),
+    [filteredChildFolders],
+  );
+  const visibleRepositoryEntryCount = visibleRepositoryDocumentIds.length
+    + visibleRepositoryFolderIds.length;
+  const selectedVisibleRepositoryEntryCount = visibleRepositoryDocumentIds.filter(
+    (documentId) => selectedRepositoryDocumentIds.has(documentId),
+  ).length + visibleRepositoryFolderIds.filter(
+    (folderId) => selectedRepositoryFolderIds.has(folderId),
+  ).length;
+  const repositoryDeletionTargets = useMemo(() => resolveRepositoryDeletionTargets({
+    documents: documents.map(({ document }) => ({
+      id: document.id,
+      folderId: document.folderId ?? null,
+    })),
+    folders,
+    selectedDocumentIds: selectedRepositoryDocumentIds,
+    selectedFolderIds: selectedRepositoryFolderIds,
+  }), [documents, folders, selectedRepositoryDocumentIds, selectedRepositoryFolderIds]);
+  const selectedRepositoryEntryCount = selectedRepositoryDocumentIds.size
+    + selectedRepositoryFolderIds.size;
   const filteredChunkCount = useMemo(
     () => filteredDocuments.reduce((sum, document) => sum + document.chunks.length, 0),
     [filteredDocuments],
@@ -737,6 +812,12 @@ export function DocumentRagApp({
   const sourcePreviewDocument = sourcePreview
     ? documents.find(({ document }) => document.id === sourcePreview.documentId)
     : undefined;
+
+  useEffect(() => {
+    if (!repositorySelectAllRef.current) return;
+    repositorySelectAllRef.current.indeterminate = selectedVisibleRepositoryEntryCount > 0
+      && selectedVisibleRepositoryEntryCount < visibleRepositoryEntryCount;
+  }, [selectedVisibleRepositoryEntryCount, visibleRepositoryEntryCount]);
 
   function inspectorWidthBounds() {
     const layoutWidth = documentLayoutRef.current?.getBoundingClientRect().width
@@ -1176,8 +1257,62 @@ export function DocumentRagApp({
     setSelectedFolderId(folderId);
     setDocumentFilter('');
     setSelectedDocumentId('');
+    setSelectedRepositoryDocumentIds(new Set());
+    setSelectedRepositoryFolderIds(new Set());
+    setRepositoryDeleteConfirmationOpen(false);
+    setRepositoryDeleteError(null);
     setExpandedStructureChunkId(null);
     setFolderActionError(null);
+  }
+
+  function toggleRepositoryDocumentSelection(documentId: string, checked: boolean) {
+    setSelectedRepositoryDocumentIds((current) => {
+      const next = new Set(current);
+      if (checked) next.add(documentId);
+      else next.delete(documentId);
+      return next;
+    });
+  }
+
+  function toggleRepositoryFolderSelection(folderId: string, checked: boolean) {
+    setSelectedRepositoryFolderIds((current) => {
+      const next = new Set(current);
+      if (checked) next.add(folderId);
+      else next.delete(folderId);
+      return next;
+    });
+  }
+
+  function toggleVisibleRepositorySelection(checked: boolean) {
+    setSelectedRepositoryDocumentIds((current) => {
+      const next = new Set(current);
+      visibleRepositoryDocumentIds.forEach((documentId) => {
+        if (checked) next.add(documentId);
+        else next.delete(documentId);
+      });
+      return next;
+    });
+    setSelectedRepositoryFolderIds((current) => {
+      const next = new Set(current);
+      visibleRepositoryFolderIds.forEach((folderId) => {
+        if (checked) next.add(folderId);
+        else next.delete(folderId);
+      });
+      return next;
+    });
+  }
+
+  function openRepositoryDeleteConfirmation() {
+    if (!selectedRepositoryEntryCount || repositoryDeleteBusy) return;
+    setFolderActionError(null);
+    setRepositoryDeleteError(null);
+    setRepositoryDeleteConfirmationOpen(true);
+  }
+
+  function closeRepositoryDeleteConfirmation() {
+    if (repositoryDeleteBusy) return;
+    setRepositoryDeleteConfirmationOpen(false);
+    setRepositoryDeleteError(null);
   }
 
   function closeDocumentInspector() {
@@ -1220,21 +1355,89 @@ export function DocumentRagApp({
     }
   }
 
-  async function handleDeleteSelectedFolder() {
-    if (!selectedFolder || folderBusy) return;
-    if (!window.confirm(`비어 있는 “${selectedFolder.name}” 폴더를 삭제할까요?`)) return;
-    setFolderBusy(true);
+  function handleDeleteSelectedFolder() {
+    if (!selectedFolder || folderBusy || repositoryDeleteBusy) return;
+    setSelectedRepositoryDocumentIds(new Set());
+    setSelectedRepositoryFolderIds(new Set([selectedFolder.id]));
     setFolderActionError(null);
+    setRepositoryDeleteError(null);
+    setRepositoryDeleteConfirmationOpen(true);
+  }
+
+  async function handleBulkRepositoryDelete() {
+    if (!selectedRepositoryEntryCount || repositoryDeleteBusy) return;
+    setRepositoryDeleteBusy(true);
+    setRepositoryDeleteError(null);
+    setFolderActionError(null);
+
     try {
-      await deleteFolder(selectedFolder.id);
-      const parentId = selectedFolder.parentId;
-      setFolders((current) => current.filter((folder) => folder.id !== selectedFolder.id));
-      selectFolder(parentId);
-      if (searchFolderId === selectedFolder.id) setSearchFolderId('');
+      const result = await deleteRepositoryItems({
+        documentIds: [...selectedRepositoryDocumentIds],
+        folderIds: [...selectedRepositoryFolderIds],
+      });
+      const deletedDocumentIds = new Set(result.deletedDocumentIds);
+      const deletedFolderIds = new Set(result.deletedFolderIds);
+
+      if (deletedDocumentIds.size) {
+        setDocuments((current) => current.filter(({ document }) => (
+          !deletedDocumentIds.has(document.id)
+        )));
+        setSelectedDocumentId((current) => deletedDocumentIds.has(current) ? '' : current);
+        setSourcePreview((current) => (
+          current && deletedDocumentIds.has(current.documentId) ? null : current
+        ));
+        setActiveSources((current) => current.filter((source) => (
+          !deletedDocumentIds.has(source.documentId)
+        )));
+        setMessages((current) => current.map((message) =>
+          message.sources
+            ? {
+              ...message,
+              sources: message.sources.filter((source) => (
+                !deletedDocumentIds.has(source.documentId)
+              )),
+            }
+            : message));
+        setDocumentActionError((current) => (
+          current && deletedDocumentIds.has(current.documentId) ? null : current
+        ));
+      }
+
+      if (deletedFolderIds.size) {
+        const currentPath = folderPath(folders, selectedFolderId);
+        const nextFolderId = selectedFolderId && deletedFolderIds.has(selectedFolderId)
+          ? [...currentPath].reverse().find((folder) => !deletedFolderIds.has(folder.id))?.id ?? null
+          : selectedFolderId;
+        setFolders((current) => current.filter((folder) => !deletedFolderIds.has(folder.id)));
+        if (nextFolderId !== selectedFolderId) {
+          setSelectedFolderId(nextFolderId);
+          setDocumentFilter('');
+          setSelectedDocumentId('');
+          setExpandedStructureChunkId(null);
+        }
+        if (searchFolderId && deletedFolderIds.has(searchFolderId)) setSearchFolderId('');
+      }
+
+      setSelectedRepositoryDocumentIds((current) => new Set(
+        [...current].filter((documentId) => !deletedDocumentIds.has(documentId)),
+      ));
+      setSelectedRepositoryFolderIds((current) => new Set(
+        [...current].filter((folderId) => !deletedFolderIds.has(folderId)),
+      ));
+      setRepositoryDeleteConfirmationOpen(false);
+
+      const messages = [];
+      if (result.failures.length) {
+        messages.push(`${result.failures.length}개 문서는 삭제하지 못했습니다.`);
+      }
+      if (result.folderError) messages.push(result.folderError);
+      setFolderActionError(messages.length ? messages.join(' ') : null);
     } catch (error) {
-      setFolderActionError(error instanceof Error ? error.message : '폴더를 삭제하지 못했습니다.');
+      setRepositoryDeleteError(
+        error instanceof Error ? error.message : '선택한 항목을 삭제하지 못했습니다.',
+      );
     } finally {
-      setFolderBusy(false);
+      setRepositoryDeleteBusy(false);
     }
   }
 
@@ -1313,6 +1516,11 @@ export function DocumentRagApp({
       const remainingDocuments = documents.filter(({ document }) => document.id !== documentId);
       const nextDocument = remainingDocuments[Math.min(selectedIndex, remainingDocuments.length - 1)];
       setDocuments(remainingDocuments);
+      setSelectedRepositoryDocumentIds((current) => {
+        const next = new Set(current);
+        next.delete(documentId);
+        return next;
+      });
       setSelectedDocumentId(nextDocument?.document.id ?? '');
       setSourcePreview((current) => current?.documentId === documentId ? null : current);
       setActiveSources((current) => current.filter((source) => source.documentId !== documentId));
@@ -1720,7 +1928,7 @@ export function DocumentRagApp({
                         <button type="button" onClick={() => void handleRenameSelectedFolder()} disabled={folderBusy}>
                           <Pencil size={13} /> 이름 변경
                         </button>
-                        <button className="danger" type="button" onClick={() => void handleDeleteSelectedFolder()} disabled={folderBusy}>
+                        <button className="danger" type="button" onClick={handleDeleteSelectedFolder} disabled={folderBusy || repositoryDeleteBusy}>
                           <Trash2 size={13} /> 삭제
                         </button>
                       </>
@@ -1739,6 +1947,15 @@ export function DocumentRagApp({
                         : '폴더와 파일을 한 목록에서 탐색합니다'}
                     </small>
                   </div>
+                  <button
+                    className="repository-bulk-delete-button"
+                    type="button"
+                    disabled={!selectedRepositoryEntryCount || repositoryDeleteBusy}
+                    onClick={openRepositoryDeleteConfirmation}
+                  >
+                    {repositoryDeleteBusy ? <LoaderCircle size={14} className="spin" /> : <Trash2 size={14} />}
+                    선택 삭제{selectedRepositoryEntryCount ? ` ${selectedRepositoryEntryCount}` : ''}
+                  </button>
                   <span>{filteredChildFolders.length + filteredDocuments.length}개</span>
                   <label className="document-sort-select">
                     <ArrowDownAZ size={14} />
@@ -1765,7 +1982,18 @@ export function DocumentRagApp({
                   }}
                   onDrop={(event) => handleFolderDrop(event, selectedFolderId)}
                 >
-                  <div className="repository-entry-header" aria-hidden="true">
+                  <div className="repository-entry-header">
+                    <label className="repository-selection-checkbox">
+                      <input
+                        aria-label="현재 목록 전체 선택"
+                        checked={visibleRepositoryEntryCount > 0
+                          && selectedVisibleRepositoryEntryCount === visibleRepositoryEntryCount}
+                        disabled={!visibleRepositoryEntryCount || repositoryDeleteBusy}
+                        ref={repositorySelectAllRef}
+                        type="checkbox"
+                        onChange={(event) => toggleVisibleRepositorySelection(event.target.checked)}
+                      />
+                    </label>
                     <span>이름</span>
                     <span className="repository-entry-kind">종류</span>
                     <span className="repository-entry-size">크기 / 항목</span>
@@ -1776,75 +2004,107 @@ export function DocumentRagApp({
                     const counts = folderContentCounts.get(folder.id);
                     const itemCount = (counts?.folders ?? 0) + (counts?.documents ?? 0);
                     return (
-                      <button
-                        aria-label={`${folder.name} 폴더 열기`}
+                      <div
                         className={`repository-entry-row folder-entry ${dragOverFolderId === folder.id ? 'drop-target' : ''}`}
-                        draggable
                         key={folder.id}
-                        type="button"
-                        onClick={() => selectFolder(folder.id)}
-                        onDragStart={(event) => {
-                          event.dataTransfer.effectAllowed = 'move';
-                          event.dataTransfer.setData(FOLDER_DRAG_TYPE, folder.id);
-                        }}
-                        onDragEnd={() => setDragOverFolderId(null)}
-                        onDragOver={(event) => {
-                          event.preventDefault();
-                          event.stopPropagation();
-                          setDragOverFolderId(folder.id);
-                        }}
-                        onDrop={(event) => handleFolderDrop(event, folder.id)}
                       >
-                        <span className="repository-entry-name">
-                          <span className="repository-entry-icon folder"><Folder size={19} /></span>
-                          <span><strong>{folder.name}</strong><small>폴더</small></span>
-                        </span>
-                        <span className="repository-entry-kind">폴더</span>
-                        <span className="repository-entry-size">{itemCount}개 항목</span>
-                        <span className="repository-entry-date">{formatDate(folder.updatedAt)}</span>
-                        <ChevronRight size={15} className="repository-entry-action" />
-                      </button>
+                        <label className="repository-selection-checkbox">
+                          <input
+                            aria-label={`${folder.name} 폴더 선택`}
+                            checked={selectedRepositoryFolderIds.has(folder.id)}
+                            disabled={repositoryDeleteBusy}
+                            type="checkbox"
+                            onChange={(event) => toggleRepositoryFolderSelection(
+                              folder.id,
+                              event.target.checked,
+                            )}
+                          />
+                        </label>
+                        <button
+                          aria-label={`${folder.name} 폴더 열기`}
+                          className="repository-entry-open"
+                          draggable
+                          type="button"
+                          onClick={() => selectFolder(folder.id)}
+                          onDragStart={(event) => {
+                            event.dataTransfer.effectAllowed = 'move';
+                            event.dataTransfer.setData(FOLDER_DRAG_TYPE, folder.id);
+                          }}
+                          onDragEnd={() => setDragOverFolderId(null)}
+                          onDragOver={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            setDragOverFolderId(folder.id);
+                          }}
+                          onDrop={(event) => handleFolderDrop(event, folder.id)}
+                        >
+                          <span className="repository-entry-name">
+                            <span className="repository-entry-icon folder"><Folder size={19} /></span>
+                            <span><strong>{folder.name}</strong><small>폴더</small></span>
+                          </span>
+                          <span className="repository-entry-kind">폴더</span>
+                          <span className="repository-entry-size">{itemCount}개 항목</span>
+                          <span className="repository-entry-date">{formatDate(folder.updatedAt)}</span>
+                          <ChevronRight size={15} className="repository-entry-action" />
+                        </button>
+                      </div>
                     );
                   })}
                   {filteredDocuments.map((item) => {
                     const Icon = fileIcon(item.document.sourceType);
                     return (
-                      <button
+                      <div
                         className={`repository-entry-row document-entry${
                           selectedDocument?.document.id === item.document.id ? ' selected' : ''
                         }`}
-                        draggable
                         key={item.document.id}
-                        type="button"
-                        onClick={() => setSelectedDocumentId(item.document.id)}
-                        onDragStart={(event) => {
-                          event.dataTransfer.effectAllowed = 'move';
-                          event.dataTransfer.setData(DOCUMENT_DRAG_TYPE, item.document.id);
-                        }}
-                        onDragEnd={() => setDragOverFolderId(null)}
                       >
-                        <span className="repository-entry-name">
-                          <span className={`repository-entry-icon ${item.document.sourceType}`}>
-                            <Icon size={19} />
+                        <label className="repository-selection-checkbox">
+                          <input
+                            aria-label={`${item.document.title} 문서 선택`}
+                            checked={selectedRepositoryDocumentIds.has(item.document.id)}
+                            disabled={repositoryDeleteBusy}
+                            type="checkbox"
+                            onChange={(event) => toggleRepositoryDocumentSelection(
+                              item.document.id,
+                              event.target.checked,
+                            )}
+                          />
+                        </label>
+                        <button
+                          className="repository-entry-open"
+                          draggable
+                          type="button"
+                          onClick={() => setSelectedDocumentId(item.document.id)}
+                          onDragStart={(event) => {
+                            event.dataTransfer.effectAllowed = 'move';
+                            event.dataTransfer.setData(DOCUMENT_DRAG_TYPE, item.document.id);
+                          }}
+                          onDragEnd={() => setDragOverFolderId(null)}
+                        >
+                          <span className="repository-entry-name">
+                            <span className={`repository-entry-icon ${item.document.sourceType}`}>
+                              <Icon size={19} />
+                            </span>
+                            <span>
+                              <strong>{item.document.title}</strong>
+                              <small>{item.document.name}</small>
+                            </span>
                           </span>
-                          <span>
-                            <strong>{item.document.title}</strong>
-                            <small>{item.document.name}</small>
+                          <span className="repository-entry-kind">
+                            {item.document.sourceType.toUpperCase()} · {item.chunks.length} chunks
                           </span>
-                        </span>
-                        <span className="repository-entry-kind">
-                          {item.document.sourceType.toUpperCase()} · {item.chunks.length} chunks
-                        </span>
-                        <span className="repository-entry-size">{formatBytes(item.document.sizeBytes)}</span>
-                        <span className="repository-entry-date">{formatDate(item.indexedAt)}</span>
-                        {item.status === 'ready' ? (
-                          <CheckCircle2 size={16} className="ready-icon repository-entry-action" />
-                        ) : item.status === 'failed' ? (
-                          <XCircle size={16} className="failed-icon repository-entry-action" />
-                        ) : (
-                          <LoaderCircle size={16} className="processing-icon spin repository-entry-action" />
-                        )}
-                      </button>
+                          <span className="repository-entry-size">{formatBytes(item.document.sizeBytes)}</span>
+                          <span className="repository-entry-date">{formatDate(item.indexedAt)}</span>
+                          {item.status === 'ready' ? (
+                            <CheckCircle2 size={16} className="ready-icon repository-entry-action" />
+                          ) : item.status === 'failed' ? (
+                            <XCircle size={16} className="failed-icon repository-entry-action" />
+                          ) : (
+                            <LoaderCircle size={16} className="processing-icon spin repository-entry-action" />
+                          )}
+                        </button>
+                      </div>
                     );
                   })}
                   {!filteredChildFolders.length && !filteredDocuments.length ? (
@@ -2275,6 +2535,72 @@ export function DocumentRagApp({
           </section>
         ) : null}
       </main>
+
+      {repositoryDeleteConfirmationOpen ? (
+        <div
+          className="repository-delete-modal-backdrop"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) closeRepositoryDeleteConfirmation();
+          }}
+        >
+          <section
+            aria-busy={repositoryDeleteBusy}
+            aria-labelledby="repository-delete-modal-title"
+            aria-modal="true"
+            className="repository-delete-modal"
+            ref={repositoryDeleteModalRef}
+            role="dialog"
+          >
+            <div className="repository-delete-modal-icon"><Trash2 size={22} /></div>
+            <span className="eyebrow">PERMANENT DELETE</span>
+            <h2 id="repository-delete-modal-title">선택한 항목을 삭제할까요?</h2>
+            <p>
+              원본 파일, 구조화 데이터와 Qdrant 검색 벡터가 함께 삭제되며 되돌릴 수 없습니다.
+            </p>
+            <dl className="repository-delete-summary">
+              <div>
+                <dt>선택</dt>
+                <dd>{selectedRepositoryEntryCount}개 항목</dd>
+              </div>
+              <div>
+                <dt>삭제될 폴더</dt>
+                <dd>{repositoryDeletionTargets.folderIds.length}개</dd>
+              </div>
+              <div>
+                <dt>삭제될 문서</dt>
+                <dd>{repositoryDeletionTargets.documentIds.length}개</dd>
+              </div>
+            </dl>
+            {repositoryDeletionTargets.folderIds.length ? (
+              <p className="repository-delete-folder-warning">
+                선택한 폴더의 모든 하위 폴더와 문서도 삭제 대상에 포함됩니다.
+              </p>
+            ) : null}
+            {repositoryDeleteError ? (
+              <p className="repository-delete-modal-error" role="alert">{repositoryDeleteError}</p>
+            ) : null}
+            <div className="repository-delete-modal-actions">
+              <button
+                ref={repositoryDeleteCancelRef}
+                type="button"
+                disabled={repositoryDeleteBusy}
+                onClick={closeRepositoryDeleteConfirmation}
+              >
+                취소
+              </button>
+              <button
+                className="danger"
+                type="button"
+                disabled={repositoryDeleteBusy}
+                onClick={() => void handleBulkRepositoryDelete()}
+              >
+                {repositoryDeleteBusy ? <LoaderCircle size={15} className="spin" /> : <Trash2 size={15} />}
+                {repositoryDeleteBusy ? '삭제 중' : '영구 삭제'}
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
 
       {sourcePreview && sourcePreviewDocument ? (
         <div

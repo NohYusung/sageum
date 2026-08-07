@@ -98,3 +98,15 @@ export type ApiErrorResponse = {
   error: string;
   code?: string;
 };
+
+export type RepositoryBulkDeleteFailure = {
+  documentId: string;
+  message: string;
+};
+
+export type RepositoryBulkDeleteResponse = {
+  deletedDocumentIds: string[];
+  deletedFolderIds: string[];
+  failures: RepositoryBulkDeleteFailure[];
+  folderError: string | null;
+};

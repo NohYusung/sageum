@@ -80,6 +80,7 @@ flowchart LR
   - keyword: `embedding_model`
 - 모든 query는 `owner_id`와 `embedding_model` must-filter를 포함한다.
 - 선택 문서 검색은 `document_id match any`를 추가하고, 삭제는 `owner_id`와 문서·버전을 함께 필터한다.
+- 문서·폴더 대량 삭제는 서버가 사용자 소유권과 폴더 하위 범위를 재검증하고, 외부 리소스 정리가 끝난 폴더 트리만 DB 트랜잭션으로 제거한다.
 - strict mode에서 필터가 거부되지 않도록 컬렉션 사용 전에 payload index를 생성한다.
 - 기존 Collection 벡터 차원이 설정과 다르면 자동 재생성하지 않고 운영 오류로 반환한다.
 

@@ -199,3 +199,88 @@ revoke all on function public.move_folder(uuid, uuid) from public, anon;
 revoke all on function public.move_document(uuid, uuid) from public, anon;
 grant execute on function public.move_folder(uuid, uuid) to authenticated;
 grant execute on function public.move_document(uuid, uuid) to authenticated;
+
+drop function if exists public.delete_folder_trees(uuid[]);
+create function public.delete_folder_trees(p_folder_ids uuid[])
+returns uuid[]
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  v_owner_id uuid := (select auth.uid());
+  v_target_ids uuid[];
+  v_deleted_count integer;
+  v_passes integer := 0;
+begin
+  if v_owner_id is null then
+    raise exception 'authentication required' using errcode = '28000';
+  end if;
+
+  if coalesce(cardinality(p_folder_ids), 0) = 0 then
+    return '{}'::uuid[];
+  end if;
+
+  if cardinality(p_folder_ids) > 1000 then
+    raise exception 'too many folder roots' using errcode = '22023';
+  end if;
+
+  if exists (
+    select 1
+    from unnest(p_folder_ids) as requested(id)
+    left join public.folders as folder
+      on folder.id = requested.id
+     and folder.owner_id = v_owner_id
+    where folder.id is null
+  ) then
+    raise exception 'folder not found' using errcode = 'P0002';
+  end if;
+
+  with recursive targets(id) as (
+    select folder.id
+    from public.folders as folder
+    where folder.owner_id = v_owner_id
+      and folder.id = any(p_folder_ids)
+    union
+    select child.id
+    from public.folders as child
+    join targets as parent on child.parent_id = parent.id
+    where child.owner_id = v_owner_id
+  )
+  select coalesce(array_agg(target.id order by target.id), '{}'::uuid[])
+  into v_target_ids
+  from targets as target;
+
+  while exists (
+    select 1
+    from public.folders as folder
+    where folder.owner_id = v_owner_id
+      and folder.id = any(v_target_ids)
+  ) loop
+    delete from public.folders as folder
+    where folder.owner_id = v_owner_id
+      and folder.id = any(v_target_ids)
+      and not exists (
+        select 1
+        from public.folders as child
+        where child.parent_id = folder.id
+          and child.owner_id = v_owner_id
+      );
+
+    get diagnostics v_deleted_count = row_count;
+    if v_deleted_count = 0 then
+      raise exception 'folder tree is not empty or cannot be deleted' using errcode = '23503';
+    end if;
+
+    v_passes := v_passes + 1;
+    if v_passes > 1000 then
+      raise exception 'folder tree exceeds maximum depth' using errcode = '54001';
+    end if;
+  end loop;
+
+  return v_target_ids;
+end
+$$;
+
+revoke all on function public.delete_folder_trees(uuid[]) from public, anon;
+grant execute on function public.delete_folder_trees(uuid[]) to authenticated;

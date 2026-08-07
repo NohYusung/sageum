@@ -419,6 +419,10 @@ export type Database = {
         };
         Returns: undefined;
       };
+      delete_folder_trees: {
+        Args: { p_folder_ids: string[] };
+        Returns: string[];
+      };
       mark_failed_ingestion_cleanup: {
         Args: {
           p_deletion_job_id: string;

@@ -1,7 +1,7 @@
 import type { DocumentSourceType } from '@/lib/rag/types';
 
 export const DOCUMENT_BUCKET = 'documents';
-export const MAX_DOCUMENT_BYTES = 10 * 1024 * 1024;
+export const MAX_DOCUMENT_BYTES = 50 * 1024 * 1024;
 
 const EXTENSION_TYPES = new Map<string, DocumentSourceType>([
   ['md', 'markdown'],
@@ -87,7 +87,7 @@ export function validateDocumentMetadata(input: {
     throw new DocumentValidationError('빈 파일은 업로드할 수 없습니다.');
   }
   if (input.sizeBytes > MAX_DOCUMENT_BYTES) {
-    throw new DocumentValidationError('개인 데모에서는 파일당 10MB까지 처리합니다.');
+    throw new DocumentValidationError('파일당 50MB까지 처리합니다.');
   }
 
   const sourceType = detectDocumentSourceType(name, input.mimeType);

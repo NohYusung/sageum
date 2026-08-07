@@ -25,14 +25,22 @@ test('Storage 객체명은 원본 파일명과 무관한 ASCII 버전 키를 사
   assert.equal(storageObjectName(versionId, 'xlsx'), `${versionId}.xlsx`);
 });
 
-test('빈 파일과 10MB 초과 파일을 거부한다', () => {
+test('빈 파일과 50MB 초과 파일을 거부한다', () => {
+  assert.equal(
+    validateDocumentMetadata({
+      name: 'limit.txt',
+      mimeType: 'text/plain',
+      sizeBytes: MAX_DOCUMENT_BYTES,
+    }).sizeBytes,
+    MAX_DOCUMENT_BYTES,
+  );
   assert.throws(
     () => validateDocumentMetadata({ name: 'empty.txt', mimeType: 'text/plain', sizeBytes: 0 }),
     /빈 파일/u,
   );
   assert.throws(
     () => validateDocumentMetadata({ name: 'large.txt', mimeType: 'text/plain', sizeBytes: MAX_DOCUMENT_BYTES + 1 }),
-    /10MB/u,
+    /50MB/u,
   );
 });
 

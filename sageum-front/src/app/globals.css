@@ -1443,7 +1443,8 @@ svg {
 }
 
 .primary-action,
-.dropzone > button {
+.dropzone > button,
+.upload-picker-actions > button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1460,7 +1461,8 @@ svg {
 }
 
 .primary-action:hover,
-.dropzone > button:hover {
+.dropzone > button:hover,
+.upload-picker-actions > button:hover {
   border-color: var(--sage);
   background: var(--sage);
 }
@@ -2720,6 +2722,13 @@ body.resizing-document-inspector * {
   font-size: 11px;
 }
 
+.upload-picker-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+
 .dropzone input {
   display: none;
 }
@@ -3011,6 +3020,7 @@ body.resizing-document-inspector * {
 .upload-status-heading > button,
 .upload-job-open,
 .upload-job-retry,
+.upload-job-cleanup,
 .upload-job-empty button {
   display: inline-flex;
   align-items: center;
@@ -3206,6 +3216,16 @@ body.resizing-document-inspector * {
   font-size: 10px;
 }
 
+.upload-job-cleanup-error {
+  margin: 7px 0 0 49px;
+  padding: 9px 11px;
+  border: 1px solid #efc7c1;
+  border-radius: 7px;
+  background: #fff8f6;
+  color: var(--danger);
+  font-size: 10px;
+}
+
 .upload-job-actions {
   display: flex;
   justify-content: flex-end;
@@ -3220,6 +3240,23 @@ body.resizing-document-inspector * {
 }
 
 .upload-job-retry:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.upload-job-cleanup {
+  border-color: #e4b7b0;
+  background: #fff8f6;
+  color: var(--danger);
+}
+
+.upload-job-cleanup:hover {
+  border-color: #d68e84;
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.upload-job-cleanup:disabled {
   cursor: wait;
   opacity: 0.55;
 }

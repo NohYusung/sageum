@@ -29,7 +29,7 @@ flowchart LR
 - 파일 원본은 Vercel 요청 본문을 통과하지 않고 signed upload URL로 Storage에 직접 전송한다.
 - 파일 파싱, Qdrant 접근, 사용자 소유 데이터 저장은 Next.js Node.js Route Handler에서 수행한다.
 - 문서·질문 임베딩은 브라우저에서 수행하되 서버가 사용자 소유권, 문서 버전, 전체 청크 ID, 모델·차원을 검증한 뒤에만 Qdrant에 기록한다.
-- Vercel 함수 제한을 넘는 대형 비동기 작업은 개인 데모 범위에서 제외하고 파일당 10MB로 제한한다.
+- 파일당 앱 검증 한도는 50MB이며 원본은 Vercel 요청 본문을 거치지 않고 Supabase Storage로 직접 전송한다.
 
 ## 저장 책임
 
@@ -115,7 +115,7 @@ flowchart LR
 
 ## 무료 개인 데모 제약
 
-- 파일당 10MB, 한 요청당 소수 파일로 제한한다.
+- 앱과 Supabase Free 플랜의 Storage 상한을 파일당 50MB로 맞춘다.
 - 동시 처리와 임베딩 배치 크기를 작게 유지한다.
 - 첫 실행에는 약 330MB 모델 다운로드가 필요하며 이후 브라우저 캐시를 재사용한다.
 - Vercel 함수에서 장시간 queue worker를 운영하지 않는다.

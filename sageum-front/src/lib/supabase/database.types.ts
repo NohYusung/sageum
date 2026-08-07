@@ -124,6 +124,8 @@ export type Database = {
       document_ingestion_jobs: {
         Row: {
           attempts: number;
+          cleanup_error: string | null;
+          cleanup_started_at: string | null;
           completed_at: string | null;
           created_at: string;
           document_id: string | null;
@@ -146,6 +148,8 @@ export type Database = {
         };
         Insert: {
           attempts?: number;
+          cleanup_error?: string | null;
+          cleanup_started_at?: string | null;
           completed_at?: string | null;
           created_at?: string;
           document_id?: string | null;
@@ -168,6 +172,8 @@ export type Database = {
         };
         Update: {
           attempts?: number;
+          cleanup_error?: string | null;
+          cleanup_started_at?: string | null;
           completed_at?: string | null;
           created_at?: string;
           document_id?: string | null;
@@ -405,6 +411,22 @@ export type Database = {
         Args: { p_document_id: string; p_job_id: string };
         Returns: undefined;
       };
+      complete_failed_ingestion_cleanup: {
+        Args: {
+          p_deletion_job_id: string;
+          p_document_id: string;
+          p_ingestion_job_id: string;
+        };
+        Returns: undefined;
+      };
+      mark_failed_ingestion_cleanup: {
+        Args: {
+          p_deletion_job_id: string;
+          p_ingestion_job_id: string;
+          p_message: string;
+        };
+        Returns: undefined;
+      };
       move_document: {
         Args: { p_document_id: string; p_folder_id: string | null };
         Returns: undefined;
@@ -417,6 +439,17 @@ export type Database = {
         Args: { p_document_id: string };
         Returns: {
           job_id: string;
+          requires_vector_cleanup: boolean;
+          storage_paths: string[];
+        }[];
+      };
+      request_failed_ingestion_cleanup: {
+        Args: { p_job_id: string };
+        Returns: {
+          cleanup_completed: boolean;
+          deletion_job_id: string | null;
+          document_id: string | null;
+          ingestion_job_id: string;
           requires_vector_cleanup: boolean;
           storage_paths: string[];
         }[];

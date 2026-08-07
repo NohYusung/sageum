@@ -22,6 +22,8 @@ const ROW = {
   original_available: true,
   processing_token: null,
   workflow_run_id: 'wfr_test',
+  cleanup_started_at: '2026-08-06T00:02:00.000Z',
+  cleanup_error: 'Storage 삭제 실패',
   last_error: 'Qdrant 색인 실패',
   started_at: '2026-08-06T00:00:00.000Z',
   completed_at: '2026-08-06T00:01:00.000Z',
@@ -38,6 +40,8 @@ test('DB ingestion job을 영구 처리 이력 모델로 변환한다', () => {
   assert.equal(job.stage, 'indexing');
   assert.equal(job.attempts, 2);
   assert.equal(job.originalAvailable, true);
+  assert.equal(job.cleanupStartedAt, '2026-08-06T00:02:00.000Z');
+  assert.equal(job.cleanupError, 'Storage 삭제 실패');
   assert.equal(job.workflowRunId, 'wfr_test');
 });
 

@@ -66,6 +66,8 @@ export function mapStoredIngestionJob(row: StoredIngestionJob): DocumentIngestio
       : 'failed',
     attempts: row.attempts,
     originalAvailable: row.original_available,
+    cleanupStartedAt: row.cleanup_started_at,
+    cleanupError: row.cleanup_error,
     lastError: row.last_error,
     startedAt: row.started_at,
     completedAt: row.completed_at,

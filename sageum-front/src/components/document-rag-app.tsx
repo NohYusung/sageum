@@ -49,7 +49,10 @@ import {
   useState,
 } from 'react';
 import { logoutAction } from '@/app/actions';
-import { deleteStoredDocument } from '@/lib/documents/browser-delete';
+import {
+  cleanupFailedIngestionJob,
+  deleteStoredDocument,
+} from '@/lib/documents/browser-delete';
 import {
   fetchDocumentIngestionJob,
   reuploadAndProcessDocument,
@@ -76,6 +79,13 @@ import {
   flattenFolderTree,
   folderPath,
 } from '@/lib/folders/tree';
+import {
+  buildFolderUploadPlan,
+  ensureFolderUploadTree,
+  folderUploadEntriesFromDrop,
+  folderUploadPathKey,
+  type FolderUploadEntry,
+} from '@/lib/folders/folder-upload';
 import type { Folder as RepositoryFolder } from '@/lib/folders/types';
 import type {
   ApiErrorResponse,
@@ -112,6 +122,10 @@ type UploadJob = Omit<DocumentIngestionJob, 'id' | 'stage'> & {
   id: string;
   jobId: string | null;
   stage: DocumentUploadStage;
+};
+type DocumentUploadEntry = {
+  file: File;
+  folderId: string | null;
 };
 type UploadJobFilter = 'all' | 'running' | 'ready' | 'failed';
 const UPLOAD_PAGE_SIZES = [10, 30, 50] as const;
@@ -526,6 +540,9 @@ export function DocumentRagApp({
   const [retryingUploadJobIds, setRetryingUploadJobIds] = useState<Set<string>>(
     () => new Set(),
   );
+  const [cleaningUploadJobIds, setCleaningUploadJobIds] = useState<Set<string>>(
+    () => new Set(),
+  );
   const [retryFileJobId, setRetryFileJobId] = useState<string | null>(null);
   const [uploadRecoveryNow, setUploadRecoveryNow] = useState(() => Date.now());
   const [deletingDocumentId, setDeletingDocumentId] = useState<string | null>(null);
@@ -536,6 +553,7 @@ export function DocumentRagApp({
   const [searchBusy, setSearchBusy] = useState(false);
   const [system, setSystem] = useState<SystemStatus | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const folderInputRef = useRef<HTMLInputElement | null>(null);
   const retryFileInputRef = useRef<HTMLInputElement | null>(null);
   const conversationRef = useRef<HTMLDivElement | null>(null);
   const documentLayoutRef = useRef<HTMLDivElement | null>(null);
@@ -543,6 +561,7 @@ export function DocumentRagApp({
   const sourceModalCloseRef = useRef<HTMLButtonElement | null>(null);
   const sourceModalTriggerRef = useRef<HTMLElement | null>(null);
   const retryingUploadJobIdsRef = useRef<Set<string>>(new Set());
+  const cleaningUploadJobIdsRef = useRef<Set<string>>(new Set());
   const userInitial = userEmail.charAt(0).toLocaleUpperCase('ko-KR') || '?';
 
   useEffect(() => {
@@ -845,19 +864,19 @@ export function DocumentRagApp({
     setView('documents');
   }
 
-  async function handleFiles(
-    fileList: FileList | File[],
-    folderId = selectedFolderId,
+  async function handleUploadEntries(
+    entries: DocumentUploadEntry[],
+    selectedFolderAfterUpload: string | null,
     retryOfJobId: string | null = null,
   ) {
-    const files = Array.from(fileList);
-    if (!files.length) return;
-    const jobs = files.map((file) => {
+    if (!entries.length) return;
+    const jobs = entries.map(({ file, folderId }) => {
       const id = crypto.randomUUID();
       const now = new Date().toISOString();
       return {
         id,
         file,
+        folderId,
         progress: {
           id,
           jobId: null,
@@ -872,6 +891,8 @@ export function DocumentRagApp({
           status: 'queued',
           attempts: 1,
           originalAvailable: false,
+          cleanupStartedAt: null,
+          cleanupError: null,
           lastError: null,
           startedAt: null,
           completedAt: null,
@@ -887,7 +908,7 @@ export function DocumentRagApp({
     setView('upload-status');
 
     const results = await Promise.allSettled(
-      jobs.map(async ({ id, file }) => {
+      jobs.map(async ({ id, file, folderId }) => {
         let persistedJobId: string | null = null;
         try {
           const document = await uploadAndProcessDocument(
@@ -931,7 +952,7 @@ export function DocumentRagApp({
     );
 
     if (succeeded.length) {
-      setSelectedFolderId(folderId);
+      setSelectedFolderId(selectedFolderAfterUpload);
       setUploadMessage(
         system?.mode === 'cloud'
           ? `${succeeded.length}개 문서를 Supabase에 저장하고 Qdrant에 색인했습니다.`
@@ -942,6 +963,69 @@ export function DocumentRagApp({
       setUploadMessage(`실패: ${failures.join(' ')}`);
     }
     setUploadBusy(false);
+  }
+
+  async function handleFiles(
+    fileList: FileList | File[],
+    folderId = selectedFolderId,
+    retryOfJobId: string | null = null,
+  ) {
+    const files = Array.from(fileList);
+    return handleUploadEntries(
+      files.map((file) => ({ file, folderId })),
+      folderId,
+      retryOfJobId,
+    );
+  }
+
+  async function handleFolderFiles(entries: FolderUploadEntry[]) {
+    if (uploadBusy) return;
+    if (!entries.length) {
+      setUploadMessage('실패: 선택한 폴더에 업로드할 파일이 없습니다.');
+      return;
+    }
+    setUploadBusy(true);
+    setUploadMessage(null);
+    try {
+      const plan = buildFolderUploadPlan(entries);
+      const ensured = await ensureFolderUploadTree({
+        plan,
+        destinationFolderId: selectedFolderId,
+        existingFolders: folders,
+        create: createFolder,
+      });
+      setFolders(ensured.folders);
+      await handleUploadEntries(
+        plan.files.map(({ file, directoryPath }) => {
+          const folderId = ensured.folderIdsByPath.get(folderUploadPathKey(directoryPath));
+          if (!folderId) throw new Error(`${directoryPath.join('/')} 폴더를 찾을 수 없습니다.`);
+          return { file, folderId };
+        }),
+        ensured.rootFolderId,
+      );
+    } catch (error) {
+      setUploadBusy(false);
+      setUploadMessage(
+        `실패: ${error instanceof Error ? error.message : '폴더를 업로드하지 못했습니다.'}`,
+      );
+    }
+  }
+
+  async function handleUploadDrop(dataTransfer: DataTransfer) {
+    const files = Array.from(dataTransfer.files);
+    try {
+      const folderEntries = await folderUploadEntriesFromDrop(dataTransfer);
+      if (folderEntries) {
+        await handleFolderFiles(folderEntries);
+        return;
+      }
+      await handleFiles(files);
+    } catch (error) {
+      setUploadBusy(false);
+      setUploadMessage(
+        `실패: ${error instanceof Error ? error.message : '폴더를 읽지 못했습니다.'}`,
+      );
+    }
   }
 
   async function retryPersistentUploadJob(job: UploadJob, file?: File) {
@@ -963,6 +1047,8 @@ export function DocumentRagApp({
       stage: job.stage,
       attempts: job.attempts,
       originalAvailable: job.originalAvailable,
+      cleanupStartedAt: job.cleanupStartedAt,
+      cleanupError: job.cleanupError,
       lastError: job.lastError,
       startedAt: job.startedAt,
       completedAt: job.completedAt,
@@ -1011,7 +1097,11 @@ export function DocumentRagApp({
   }
 
   function handleRetryUploadJob(job: UploadJob) {
-    if (retryingUploadJobIdsRef.current.has(job.id)) return;
+    if (
+      retryingUploadJobIdsRef.current.has(job.id)
+      || cleaningUploadJobIdsRef.current.has(job.id)
+      || job.cleanupStartedAt
+    ) return;
     if (
       canResumeDocumentIngestion(job)
       || job.originalAvailable && job.documentId && job.versionId
@@ -1026,12 +1116,60 @@ export function DocumentRagApp({
   function handleRetryFile(file: File) {
     const job = uploadJobs.find((candidate) => candidate.id === retryFileJobId);
     setRetryFileJobId(null);
-    if (!job) return;
+    if (!job || job.cleanupStartedAt) return;
     if (job.jobId && job.documentId && job.versionId && !job.originalAvailable) {
       void retryPersistentUploadJob(job, file);
       return;
     }
     void handleFiles([file], job.folderId, job.jobId);
+  }
+
+  async function handleCleanupUploadJob(job: UploadJob) {
+    if (
+      job.status !== 'failed'
+      || retryingUploadJobIdsRef.current.has(job.id)
+      || cleaningUploadJobIdsRef.current.has(job.id)
+    ) return;
+
+    const confirmed = window.confirm(
+      `“${job.fileName}” 실패 작업을 정리할까요? 생성된 원본, 문서 데이터, 검색 벡터와 처리 이력이 모두 삭제되며 되돌릴 수 없습니다.`,
+    );
+    if (!confirmed) return;
+
+    cleaningUploadJobIdsRef.current.add(job.id);
+    setCleaningUploadJobIds(new Set(cleaningUploadJobIdsRef.current));
+    setUploadMessage(null);
+
+    try {
+      if (job.jobId) await cleanupFailedIngestionJob(job.jobId);
+      setUploadJobs((current) => current.filter((candidate) => candidate.id !== job.id));
+      if (job.documentId) {
+        setDocuments((current) => current.filter(
+          ({ document }) => document.id !== job.documentId,
+        ));
+      }
+      setUploadMessage('작업 이력과 처리 중 생성된 데이터를 정리했습니다.');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '실패 작업 정리에 실패했습니다.';
+      const cleanupStartedAt = new Date().toISOString();
+      if (job.jobId) {
+        await syncUploadJob(job.id, job.jobId).catch(() => updateUploadJob(job.id, {
+          cleanupStartedAt,
+          cleanupError: message,
+          updatedAt: cleanupStartedAt,
+        }));
+      } else {
+        updateUploadJob(job.id, {
+          cleanupStartedAt,
+          cleanupError: message,
+          updatedAt: cleanupStartedAt,
+        });
+      }
+      setUploadMessage(`정리 실패: ${message}`);
+    } finally {
+      cleaningUploadJobIdsRef.current.delete(job.id);
+      setCleaningUploadJobIds(new Set(cleaningUploadJobIdsRef.current));
+    }
   }
 
   function selectFolder(folderId: string | null) {
@@ -1792,15 +1930,20 @@ export function DocumentRagApp({
                 onDragOver={(event) => event.preventDefault()}
                 onDrop={(event) => {
                   event.preventDefault();
-                  void handleFiles(event.dataTransfer.files);
+                  void handleUploadDrop(event.dataTransfer);
                 }}
               >
                 {uploadBusy ? <LoaderCircle size={34} className="spin" /> : <UploadCloud size={34} />}
                 <h2>{uploadBusy ? '문서를 구조화하고 Qdrant에 색인하는 중입니다' : '문서를 여기에 놓으세요'}</h2>
-                <p>원문을 분석하고 300~500단어 단위의 검색 청크로 변환합니다.</p>
-                <button type="button" onClick={() => fileInputRef.current?.click()} disabled={uploadBusy}>
-                  파일 선택
-                </button>
+                <p>파일 또는 폴더를 올리면 폴더 구조를 보존하고 검색 청크로 변환합니다.</p>
+                <div className="upload-picker-actions">
+                  <button type="button" onClick={() => fileInputRef.current?.click()} disabled={uploadBusy}>
+                    파일 선택
+                  </button>
+                  <button type="button" onClick={() => folderInputRef.current?.click()} disabled={uploadBusy}>
+                    <FolderInput size={15} /> 폴더 선택
+                  </button>
+                </div>
                 <input
                   ref={fileInputRef}
                   type="file"
@@ -1811,7 +1954,26 @@ export function DocumentRagApp({
                     event.target.value = '';
                   }}
                 />
-                <small>Supabase private Storage · 파일당 최대 10MB</small>
+                <input
+                  ref={(input) => {
+                    folderInputRef.current = input;
+                    input?.setAttribute('webkitdirectory', '');
+                  }}
+                  type="file"
+                  multiple
+                  accept=".md,.markdown,.html,.htm,.txt,.pdf,.docx,.xlsx"
+                  aria-label="업로드할 폴더 선택"
+                  onChange={(event) => {
+                    if (event.target.files) {
+                      void handleFolderFiles(Array.from(event.target.files).map((file) => ({
+                        file,
+                        relativePath: file.webkitRelativePath,
+                      })));
+                    }
+                    event.target.value = '';
+                  }}
+                />
+                <small>선택 폴더부터 저장 · 로컬 상위 경로 제외 · 파일당 최대 50MB</small>
               </div>
 
               {uploadMessage ? (
@@ -1962,12 +2124,20 @@ export function DocumentRagApp({
                       </ol>
 
                       {job.lastError ? <p className="upload-job-error">{job.lastError}</p> : null}
+                      {job.cleanupError ? (
+                        <p className="upload-job-cleanup-error">
+                          정리 실패: {job.cleanupError}
+                        </p>
+                      ) : null}
                       <div className="upload-job-actions">
-                        {job.status === 'failed' || canResume ? (
+                        {(job.status === 'failed' && !job.cleanupStartedAt) || canResume ? (
                           <button
                             className="upload-job-retry"
                             type="button"
-                            disabled={retryingUploadJobIds.has(job.id)}
+                            disabled={
+                              retryingUploadJobIds.has(job.id)
+                              || cleaningUploadJobIds.has(job.id)
+                            }
                             onClick={() => handleRetryUploadJob(job)}
                           >
                             {retryingUploadJobIds.has(job.id) ? (
@@ -1980,6 +2150,28 @@ export function DocumentRagApp({
                               : job.originalAvailable && job.documentId && job.versionId
                                 ? '다시 처리'
                                 : '파일 선택 후 재시도'}
+                          </button>
+                        ) : null}
+                        {job.status === 'failed' ? (
+                          <button
+                            className="upload-job-cleanup"
+                            type="button"
+                            disabled={
+                              retryingUploadJobIds.has(job.id)
+                              || cleaningUploadJobIds.has(job.id)
+                            }
+                            onClick={() => void handleCleanupUploadJob(job)}
+                          >
+                            {cleaningUploadJobIds.has(job.id) ? (
+                              <LoaderCircle size={14} className="spin" />
+                            ) : (
+                              <Trash2 size={14} />
+                            )}
+                            {cleaningUploadJobIds.has(job.id)
+                              ? '정리 중'
+                              : job.cleanupStartedAt
+                                ? '정리 다시 시도'
+                                : '작업 정리'}
                           </button>
                         ) : null}
                         {job.status === 'ready' && job.documentId ? (

@@ -44,6 +44,8 @@ export type DocumentIngestionJob = {
   stage: DocumentIngestionStage;
   attempts: number;
   originalAvailable: boolean;
+  cleanupStartedAt: string | null;
+  cleanupError: string | null;
   lastError: string | null;
   startedAt: string | null;
   completedAt: string | null;

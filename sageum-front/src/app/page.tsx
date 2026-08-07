@@ -5,6 +5,7 @@ import {
   listFolders,
   listIndexedDocuments,
 } from '@/lib/server/document-repository';
+import { listOAuthConnections } from '@/lib/server/oauth-connections';
 import { createClient } from '@/lib/supabase/server';
 
 export default async function Home() {
@@ -14,10 +15,16 @@ export default async function Home() {
 
   if (!claims?.sub) redirect('/login');
 
-  const [initialDocuments, initialFolders, initialIngestionJobs] = await Promise.all([
+  const [
+    initialDocuments,
+    initialFolders,
+    initialIngestionJobs,
+    initialOAuthConnections,
+  ] = await Promise.all([
     listIndexedDocuments(supabase, claims.sub),
     listFolders(supabase, claims.sub),
     listDocumentIngestionJobs(supabase, claims.sub),
+    listOAuthConnections(supabase, claims.sub),
   ]);
   const userEmail = typeof claims.email === 'string' ? claims.email : '로그인 사용자';
   return (
@@ -26,6 +33,8 @@ export default async function Home() {
       initialDocuments={initialDocuments}
       initialFolders={initialFolders}
       initialIngestionJobs={initialIngestionJobs}
+      initialOAuthConnections={initialOAuthConnections.connections}
+      initialOAuthConnectionsError={initialOAuthConnections.error}
     />
   );
 }

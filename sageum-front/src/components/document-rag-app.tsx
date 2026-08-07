@@ -36,19 +36,21 @@ import {
   X,
   XCircle,
 } from 'lucide-react';
-import Link from 'next/link';
 import {
   type CSSProperties,
   type FormEvent,
   type DragEvent,
   type KeyboardEvent,
   type PointerEvent as ReactPointerEvent,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
 } from 'react';
 import { logoutAction } from '@/app/actions';
+import { OAuthConnectionsModal } from '@/components/oauth-connections-modal';
+import type { OAuthConnectionSummary } from '@/lib/auth/oauth-connections';
 import {
   cleanupFailedIngestionJob,
   deleteRepositoryItems,
@@ -505,14 +507,19 @@ export function DocumentRagApp({
   initialDocuments,
   initialFolders,
   initialIngestionJobs,
+  initialOAuthConnections,
+  initialOAuthConnectionsError,
 }: {
   userEmail: string;
   initialDocuments: IndexedDocument[];
   initialFolders: RepositoryFolder[];
   initialIngestionJobs: DocumentIngestionJob[];
+  initialOAuthConnections: OAuthConnectionSummary[];
+  initialOAuthConnectionsError: boolean;
 }) {
   const [view, setView] = useState<View>('chat');
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  const [oauthConnectionsModalOpen, setOAuthConnectionsModalOpen] = useState(false);
   const [documents, setDocuments] = useState<IndexedDocument[]>(() => initialDocuments);
   const [folders, setFolders] = useState<RepositoryFolder[]>(() => initialFolders);
   const [messages, setMessages] = useState<ChatMessage[]>(INITIAL_MESSAGES);
@@ -576,10 +583,14 @@ export function DocumentRagApp({
   const repositoryDeleteCancelRef = useRef<HTMLButtonElement | null>(null);
   const profileMenuRef = useRef<HTMLDivElement | null>(null);
   const profileMenuTriggerRef = useRef<HTMLButtonElement | null>(null);
-  const profileMenuFirstItemRef = useRef<HTMLAnchorElement | null>(null);
+  const profileMenuFirstItemRef = useRef<HTMLButtonElement | null>(null);
   const retryingUploadJobIdsRef = useRef<Set<string>>(new Set());
   const cleaningUploadJobIdsRef = useRef<Set<string>>(new Set());
   const userInitial = userEmail.charAt(0).toLocaleUpperCase('ko-KR') || '?';
+  const closeOAuthConnectionsModal = useCallback(() => {
+    setOAuthConnectionsModalOpen(false);
+    window.requestAnimationFrame(() => profileMenuTriggerRef.current?.focus());
+  }, []);
 
   useEffect(() => {
     fetch('/api/system')
@@ -1705,11 +1716,14 @@ export function DocumentRagApp({
                 <span>ACCOUNT</span>
                 <strong title={userEmail}>{userEmail}</strong>
               </div>
-              <Link
+              <button
                 ref={profileMenuFirstItemRef}
-                href="/oauth/connections"
                 role="menuitem"
-                onClick={() => setProfileMenuOpen(false)}
+                type="button"
+                onClick={() => {
+                  setProfileMenuOpen(false);
+                  setOAuthConnectionsModalOpen(true);
+                }}
               >
                 <span className="rag-profile-action-icon"><Link2 size={16} /></span>
                 <span className="rag-profile-action-copy">
@@ -1717,7 +1731,7 @@ export function DocumentRagApp({
                   <small>외부 에이전트와 MCP 연결 관리</small>
                 </span>
                 <ChevronRight size={15} />
-              </Link>
+              </button>
               <form action={logoutAction}>
                 <button type="submit" role="menuitem" onClick={() => setProfileMenuOpen(false)}>
                   <span className="rag-profile-action-icon"><LogOut size={16} /></span>
@@ -2597,6 +2611,13 @@ export function DocumentRagApp({
           </section>
         ) : null}
       </main>
+
+      <OAuthConnectionsModal
+        initialConnections={initialOAuthConnections}
+        initialError={initialOAuthConnectionsError}
+        onClose={closeOAuthConnectionsModal}
+        open={oauthConnectionsModalOpen}
+      />
 
       {repositoryDeleteConfirmationOpen ? (
         <div

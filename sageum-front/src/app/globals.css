@@ -965,15 +965,6 @@ svg {
   font-size: 10px;
 }
 
-.rag-sidebar-summary {
-  margin-top: auto;
-  padding: 16px 11px;
-  border: 1px solid var(--line);
-  border-radius: 11px;
-  background: rgb(251 251 248 / 58%);
-}
-
-.rag-sidebar-summary > span,
 .eyebrow {
   display: block;
   color: var(--muted);
@@ -982,14 +973,6 @@ svg {
   font-weight: 700;
   letter-spacing: 0.14em;
   line-height: 1.2;
-}
-
-.rag-sidebar-summary > strong {
-  display: block;
-  margin: 5px 0 14px;
-  font-family: var(--display);
-  font-size: 19px;
-  font-weight: 600;
 }
 
 .provider-row {
@@ -1023,7 +1006,7 @@ svg {
 
 .rag-profile {
   position: relative;
-  margin-top: 12px;
+  margin-top: auto;
   padding-top: 12px;
   border-top: 1px solid var(--line);
 }
@@ -1145,6 +1128,44 @@ svg {
   font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.rag-profile-status {
+  margin: 0 3px 5px;
+  padding: 7px 7px 9px;
+  border-bottom: 1px solid var(--line);
+}
+
+.rag-profile-status-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 7px;
+}
+
+.rag-profile-status-head span {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+}
+
+.rag-profile-status-head strong {
+  font-family: var(--display);
+  font-size: 14px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.rag-profile-status .provider-row {
+  padding: 3px 0;
+  font-size: 10px;
+}
+
+.rag-profile-status .provider-row em {
+  font-size: 9px;
 }
 
 .rag-profile-popover form {
@@ -4113,7 +4134,6 @@ body.resizing-document-inspector * {
   }
 
   .nav-count,
-  .rag-sidebar-summary,
   .rag-profile {
     display: none;
   }

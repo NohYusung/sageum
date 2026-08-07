@@ -1684,41 +1684,41 @@ export function DocumentRagApp({
           </button>
         </nav>
 
-        <div className="rag-sidebar-summary">
-          <span>INDEX STATUS</span>
-          <strong>{totalChunks} chunks</strong>
-          <div className="provider-row">
-            <i className={system?.providers.supabase.configured ? 'connected' : ''} />
-            Supabase
-            <em>{system?.providers.supabase.configured ? '연결됨' : '대기'}</em>
-          </div>
-          <div className="provider-row">
-            <i className={system?.providers.embedding.configured ? 'connected' : ''} />
-            Qdrant Inference
-            <em>{system?.providers.embedding.configured ? '활성' : '대기'}</em>
-          </div>
-          <div className="provider-row">
-            <i className={system?.providers.qdrant.configured ? 'connected' : ''} />
-            Qdrant
-            <em>{system?.providers.qdrant.configured ? '연결됨' : '대기'}</em>
-          </div>
-          <div className="provider-row">
-            <i className={system?.providers.generation.configured ? 'connected' : ''} />
-            Claude on AWS
-            <em>{system?.providers.generation.configured ? '활성' : '대기'}</em>
-          </div>
-        </div>
-
         <div className="rag-profile" ref={profileMenuRef}>
           {profileMenuOpen ? (
-            <div className="rag-profile-popover" role="menu" aria-label="프로필 메뉴">
+            <div className="rag-profile-popover" role="dialog" aria-label="프로필 메뉴">
               <div className="rag-profile-popover-head">
                 <span>ACCOUNT</span>
                 <strong title={userEmail}>{userEmail}</strong>
               </div>
+              <div className="rag-profile-status">
+                <div className="rag-profile-status-head">
+                  <span>INDEX STATUS</span>
+                  <strong>{totalChunks} chunks</strong>
+                </div>
+                <div className="provider-row">
+                  <i className={system?.providers.supabase.configured ? 'connected' : ''} />
+                  Supabase
+                  <em>{system?.providers.supabase.configured ? '연결됨' : '대기'}</em>
+                </div>
+                <div className="provider-row">
+                  <i className={system?.providers.embedding.configured ? 'connected' : ''} />
+                  Qdrant Inference
+                  <em>{system?.providers.embedding.configured ? '활성' : '대기'}</em>
+                </div>
+                <div className="provider-row">
+                  <i className={system?.providers.qdrant.configured ? 'connected' : ''} />
+                  Qdrant
+                  <em>{system?.providers.qdrant.configured ? '연결됨' : '대기'}</em>
+                </div>
+                <div className="provider-row">
+                  <i className={system?.providers.generation.configured ? 'connected' : ''} />
+                  Claude on AWS
+                  <em>{system?.providers.generation.configured ? '활성' : '대기'}</em>
+                </div>
+              </div>
               <button
                 ref={profileMenuFirstItemRef}
-                role="menuitem"
                 type="button"
                 onClick={() => {
                   setProfileMenuOpen(false);
@@ -1733,7 +1733,7 @@ export function DocumentRagApp({
                 <ChevronRight size={15} />
               </button>
               <form action={logoutAction}>
-                <button type="submit" role="menuitem" onClick={() => setProfileMenuOpen(false)}>
+                <button type="submit" onClick={() => setProfileMenuOpen(false)}>
                   <span className="rag-profile-action-icon"><LogOut size={16} /></span>
                   <span className="rag-profile-action-copy">
                     <strong>로그아웃</strong>
@@ -1748,7 +1748,7 @@ export function DocumentRagApp({
             ref={profileMenuTriggerRef}
             className="rag-profile-trigger"
             type="button"
-            aria-haspopup="menu"
+            aria-haspopup="dialog"
             aria-expanded={profileMenuOpen}
             onClick={() => setProfileMenuOpen((open) => !open)}
           >

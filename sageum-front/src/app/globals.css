@@ -875,12 +875,9 @@ svg {
 }
 
 .rag-profile {
-  display: grid;
-  grid-template-columns: 33px minmax(0, 1fr) auto auto;
-  align-items: center;
-  gap: 9px;
+  position: relative;
   margin-top: 12px;
-  padding: 12px 8px 2px;
+  padding-top: 12px;
   border-top: 1px solid var(--line);
 }
 
@@ -897,46 +894,176 @@ svg {
   font-weight: 700;
 }
 
-.rag-profile strong,
-.rag-profile span {
+.rag-profile-trigger {
+  display: grid;
+  grid-template-columns: 33px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: 11px;
+  background: transparent;
+  text-align: left;
+  transition: 120ms ease;
+}
+
+.rag-profile-trigger:hover,
+.rag-profile-trigger[aria-expanded='true'] {
+  border-color: var(--line-strong);
+  background: rgb(255 255 255 / 58%);
+}
+
+.rag-profile-copy,
+.rag-profile-copy strong,
+.rag-profile-copy > span {
   display: block;
 }
 
-.rag-profile strong {
+.rag-profile-copy {
+  min-width: 0;
+}
+
+.rag-profile-copy strong {
   overflow: hidden;
   font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.rag-profile span {
+.rag-profile-copy > span {
   margin-top: 1px;
   color: var(--faint);
   font-size: 9px;
 }
 
-.rag-profile form button,
-.rag-profile > a {
-  display: grid;
-  width: 30px;
-  height: 30px;
-  padding: 0;
-  place-items: center;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
+.rag-profile-chevron {
   color: var(--faint);
+  transition: transform 140ms ease;
+}
+
+.rag-profile-trigger[aria-expanded='true'] .rag-profile-chevron {
+  transform: rotate(180deg);
+}
+
+.rag-profile-popover {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 9px);
+  left: 0;
+  z-index: 30;
+  padding: 7px;
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow-medium);
+}
+
+.rag-profile-popover::after {
+  position: absolute;
+  right: 18px;
+  bottom: -5px;
+  width: 9px;
+  height: 9px;
+  border-right: 1px solid var(--line-strong);
+  border-bottom: 1px solid var(--line-strong);
+  background: var(--surface);
+  content: '';
+  transform: rotate(45deg);
+}
+
+.rag-profile-popover-head {
+  min-width: 0;
+  margin: 0 3px 5px;
+  padding: 6px 7px 9px;
+  border-bottom: 1px solid var(--line);
+}
+
+.rag-profile-popover-head span,
+.rag-profile-popover-head strong {
+  display: block;
+}
+
+.rag-profile-popover-head span {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+}
+
+.rag-profile-popover-head strong {
+  overflow: hidden;
+  margin-top: 4px;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rag-profile-popover form {
+  margin: 0;
+}
+
+.rag-profile-popover > a,
+.rag-profile-popover form button {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 48px;
+  padding: 7px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--ink-soft);
+  text-align: left;
   text-decoration: none;
 }
 
-.rag-profile form button:hover {
+.rag-profile-popover > a:hover {
+  background: var(--sage-pale);
+  color: var(--sage-dark);
+}
+
+.rag-profile-popover form button:hover {
   background: var(--danger-soft);
   color: var(--danger);
 }
 
-.rag-profile > a:hover {
+.rag-profile-action-icon {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border-radius: 8px;
   background: var(--sage-pale);
-  color: var(--sage-dark);
+  color: var(--sage);
+}
+
+.rag-profile-popover form .rag-profile-action-icon {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.rag-profile-action-copy,
+.rag-profile-action-copy strong,
+.rag-profile-action-copy small {
+  display: block;
+  min-width: 0;
+}
+
+.rag-profile-action-copy strong {
+  font-size: 11px;
+}
+
+.rag-profile-action-copy small {
+  overflow: hidden;
+  margin-top: 1px;
+  color: var(--faint);
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .rag-main {

@@ -512,6 +512,7 @@ export function DocumentRagApp({
   initialIngestionJobs: DocumentIngestionJob[];
 }) {
   const [view, setView] = useState<View>('chat');
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [documents, setDocuments] = useState<IndexedDocument[]>(() => initialDocuments);
   const [folders, setFolders] = useState<RepositoryFolder[]>(() => initialFolders);
   const [messages, setMessages] = useState<ChatMessage[]>(INITIAL_MESSAGES);
@@ -573,6 +574,9 @@ export function DocumentRagApp({
   const repositorySelectAllRef = useRef<HTMLInputElement | null>(null);
   const repositoryDeleteModalRef = useRef<HTMLElement | null>(null);
   const repositoryDeleteCancelRef = useRef<HTMLButtonElement | null>(null);
+  const profileMenuRef = useRef<HTMLDivElement | null>(null);
+  const profileMenuTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const profileMenuFirstItemRef = useRef<HTMLAnchorElement | null>(null);
   const retryingUploadJobIdsRef = useRef<Set<string>>(new Set());
   const cleaningUploadJobIdsRef = useRef<Set<string>>(new Set());
   const userInitial = userEmail.charAt(0).toLocaleUpperCase('ko-KR') || '?';
@@ -583,6 +587,31 @@ export function DocumentRagApp({
       .then(setSystem)
       .catch(() => setSystem(null));
   }, []);
+
+  useEffect(() => {
+    if (!profileMenuOpen) return;
+
+    const focusFrame = window.requestAnimationFrame(() => {
+      profileMenuFirstItemRef.current?.focus();
+    });
+    const closeOnOutsidePointer = (event: globalThis.PointerEvent) => {
+      if (event.target instanceof Node && profileMenuRef.current?.contains(event.target)) return;
+      setProfileMenuOpen(false);
+    };
+    const closeOnEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      setProfileMenuOpen(false);
+      profileMenuTriggerRef.current?.focus();
+    };
+
+    document.addEventListener('pointerdown', closeOnOutsidePointer);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      window.cancelAnimationFrame(focusFrame);
+      document.removeEventListener('pointerdown', closeOnOutsidePointer);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [profileMenuOpen]);
 
   useEffect(() => {
     if (view !== 'upload-status') return;
@@ -1669,20 +1698,53 @@ export function DocumentRagApp({
           </div>
         </div>
 
-        <div className="rag-profile">
-          <div className="rag-avatar">{userInitial}</div>
-          <div>
-            <strong title={userEmail}>{userEmail}</strong>
-            <span>{system?.mode === 'cloud' ? 'Cloud mode' : '개인 데모'}</span>
-          </div>
-          <Link href="/oauth/connections" aria-label="에이전트 연결 관리" title="에이전트 연결 관리">
-            <Link2 size={16} />
-          </Link>
-          <form action={logoutAction}>
-            <button type="submit" aria-label="로그아웃" title="로그아웃">
-              <LogOut size={16} />
-            </button>
-          </form>
+        <div className="rag-profile" ref={profileMenuRef}>
+          {profileMenuOpen ? (
+            <div className="rag-profile-popover" role="menu" aria-label="프로필 메뉴">
+              <div className="rag-profile-popover-head">
+                <span>ACCOUNT</span>
+                <strong title={userEmail}>{userEmail}</strong>
+              </div>
+              <Link
+                ref={profileMenuFirstItemRef}
+                href="/oauth/connections"
+                role="menuitem"
+                onClick={() => setProfileMenuOpen(false)}
+              >
+                <span className="rag-profile-action-icon"><Link2 size={16} /></span>
+                <span className="rag-profile-action-copy">
+                  <strong>에이전트 연결</strong>
+                  <small>외부 에이전트와 MCP 연결 관리</small>
+                </span>
+                <ChevronRight size={15} />
+              </Link>
+              <form action={logoutAction}>
+                <button type="submit" role="menuitem" onClick={() => setProfileMenuOpen(false)}>
+                  <span className="rag-profile-action-icon"><LogOut size={16} /></span>
+                  <span className="rag-profile-action-copy">
+                    <strong>로그아웃</strong>
+                    <small>현재 계정에서 안전하게 나가기</small>
+                  </span>
+                </button>
+              </form>
+            </div>
+          ) : null}
+
+          <button
+            ref={profileMenuTriggerRef}
+            className="rag-profile-trigger"
+            type="button"
+            aria-haspopup="menu"
+            aria-expanded={profileMenuOpen}
+            onClick={() => setProfileMenuOpen((open) => !open)}
+          >
+            <span className="rag-avatar">{userInitial}</span>
+            <span className="rag-profile-copy">
+              <strong title={userEmail}>{userEmail}</strong>
+              <span>{system?.mode === 'cloud' ? 'Cloud mode' : '개인 데모'}</span>
+            </span>
+            <ChevronDown className="rag-profile-chevron" size={16} />
+          </button>
         </div>
       </aside>
 

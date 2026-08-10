@@ -23,3 +23,9 @@ export function validateCredentials(formData: FormData): CredentialsValidation {
 
   return { success: true, data: { email, password } };
 }
+
+export function validatePasswordConfirmation(password: string, confirmation: string) {
+  if (!confirmation) return '비밀번호 확인을 입력해 주세요.';
+  if (password !== confirmation) return '비밀번호가 서로 일치하지 않습니다.';
+  return null;
+}

@@ -2,7 +2,7 @@
 
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
-import { validateCredentials } from '@/lib/auth/credentials';
+import { validateCredentials, validatePasswordConfirmation } from '@/lib/auth/credentials';
 import { safeRedirectPath } from '@/lib/auth/redirect';
 import { createClient } from '@/lib/supabase/server';
 
@@ -55,6 +55,12 @@ export async function authenticateAction(
   const supabase = await createClient();
 
   if (intent === 'signup') {
+    const confirmationError = validatePasswordConfirmation(
+      validation.data.password,
+      String(formData.get('confirmPassword') ?? ''),
+    );
+    if (confirmationError) return { status: 'error', message: confirmationError };
+
     const origin = await requestOrigin();
     const { data, error } = await supabase.auth.signUp({
       ...validation.data,

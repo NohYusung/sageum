@@ -229,10 +229,15 @@ svg {
   letter-spacing: -0.03em;
 }
 
-.auth-card > p {
+.auth-mode-heading > p {
   margin: 0;
   color: var(--muted);
   font-size: 13px;
+}
+
+.auth-mode-heading > p strong {
+  color: var(--ink-soft);
+  font-weight: 700;
 }
 
 .auth-card .auth-callback {
@@ -334,6 +339,38 @@ svg {
   border-color: #b5c6bc;
   background: var(--sage-pale);
   color: var(--sage-dark);
+}
+
+.auth-confirmation {
+  display: grid;
+  gap: 18px;
+  margin-top: 28px;
+}
+
+.auth-confirmation-icon {
+  display: grid;
+  width: 50px;
+  height: 50px;
+  border: 1px solid #cfe0d6;
+  border-radius: 14px;
+  background: var(--sage-pale);
+  color: var(--sage-dark);
+  place-items: center;
+}
+
+.auth-confirmation .auth-mode-heading h2 {
+  margin-top: 0;
+}
+
+.auth-confirmation .auth-secondary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 45px;
+  border-radius: 9px;
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .auth-privacy {

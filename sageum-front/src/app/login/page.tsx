@@ -49,10 +49,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
       <section className="auth-panel" aria-label="계정 인증">
         <div className="auth-card">
           <span className="eyebrow">MEMBER ACCESS</span>
-          <h2>문서 저장소에 로그인</h2>
-          <p>이메일 계정으로 개인 문서 공간에 접속하세요.</p>
-          {callbackMessage ? <p className="auth-callback" role="status">{callbackMessage}</p> : null}
-          <LoginForm nextPath={nextPath} />
+          <LoginForm nextPath={nextPath} callbackMessage={callbackMessage} />
           <small className="auth-privacy"><ShieldCheck size={14} /> 세션은 보안 쿠키로만 유지됩니다.</small>
         </div>
       </section>

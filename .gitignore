@@ -24,15 +24,5 @@ build/
 coverage/
 
 .codex/
-.sageum-agent/
 .gstack/
 .smart-env/
-
-# Keep the Sageum plugin source while ignoring local Obsidian state and
-# third-party plugins.
-.obsidian/*
-!.obsidian/community-plugins.json
-!.obsidian/plugins/
-.obsidian/plugins/*
-!.obsidian/plugins/sageum-semantic/
-!.obsidian/plugins/sageum-semantic/**

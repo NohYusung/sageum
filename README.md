@@ -356,9 +356,7 @@ sageum/
 │   ├── src/lib/server/           # Supabase·Qdrant·Claude 서버 로직
 │   ├── src/workflows/            # Vercel Workflow 문서 처리 오케스트레이션
 │   └── test/fixtures/            # PDF·DOCX·XLSX 테스트 문서
-├── docs/                         # 설계 기록
-├── sageum-back/                  # 이전 NestJS 실험 코드
-└── sageum_agent/                 # 이전 Python·Obsidian 실험 코드
+└── docs/                         # 설계 기록
 ```
 
 ## 다음 작업 후보

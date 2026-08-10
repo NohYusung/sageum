@@ -1,9 +1,0 @@
-{
-  "id": "sageum-semantic",
-  "name": "Sageum Semantic",
-  "version": "0.1.0",
-  "minAppVersion": "1.1.0",
-  "description": "Inspect Sageum concepts and relations for the active note, create concept notes from selections, and sync the Sageum vault index.",
-  "author": "Sageum",
-  "isDesktopOnly": false
-}

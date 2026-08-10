@@ -1733,7 +1733,7 @@ export function DocumentRagApp({
                 <ChevronRight size={15} />
               </button>
               <form action={logoutAction}>
-                <button type="submit" onClick={() => setProfileMenuOpen(false)}>
+                <button type="submit">
                   <span className="rag-profile-action-icon"><LogOut size={16} /></span>
                   <span className="rag-profile-action-copy">
                     <strong>로그아웃</strong>

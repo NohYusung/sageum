@@ -225,7 +225,7 @@ export function OAuthConnectionsModal({
         aria-busy={Boolean(busyClientId)}
         aria-labelledby="oauth-connections-modal-title"
         aria-modal="true"
-        className="oauth-connections-modal"
+        className={`oauth-connections-modal${modalView === 'guide' ? ' is-guide-view' : ''}`}
         ref={modalRef}
         role="dialog"
       >

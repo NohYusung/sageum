@@ -818,6 +818,15 @@ svg {
   font-size: 11px;
 }
 
+.oauth-connections-modal.is-guide-view .oauth-connections-modal-header > div > .eyebrow {
+  font-size: 9px;
+}
+
+.oauth-connections-modal.is-guide-view .oauth-connections-modal-header p {
+  font-size: 13px;
+  line-height: 1.5;
+}
+
 .oauth-connections-modal-header-actions {
   display: flex;
   align-items: center;
@@ -927,6 +936,10 @@ svg {
   gap: 20px;
 }
 
+.mcp-connection-guide .eyebrow {
+  font-size: 9px;
+}
+
 .mcp-guide-endpoint {
   display: grid;
   grid-template-columns: minmax(190px, .7fr) minmax(0, 1.3fr);
@@ -947,13 +960,13 @@ svg {
   margin-top: 5px;
   color: var(--sage-dark);
   font-family: var(--display);
-  font-size: 18px;
+  font-size: 20px;
 }
 
 .mcp-guide-endpoint p {
   margin: 4px 0 0;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 13px;
   line-height: 1.55;
 }
 
@@ -974,7 +987,7 @@ svg {
   overflow: hidden;
   color: var(--ink-soft);
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -991,7 +1004,7 @@ svg {
   border-radius: 7px;
   background: var(--surface);
   color: var(--ink-soft);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 750;
   white-space: nowrap;
 }
@@ -1006,7 +1019,7 @@ svg {
   min-height: 16px;
   margin: -14px 2px -12px;
   color: var(--sage-dark);
-  font-size: 10px;
+  font-size: 11px;
   text-align: right;
 }
 
@@ -1030,7 +1043,7 @@ svg {
   border-radius: 7px;
   background: transparent;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 750;
 }
 
@@ -1086,13 +1099,13 @@ svg {
 .mcp-guide-client-heading h3,
 .mcp-guide-section-heading h3 {
   font-family: var(--display);
-  font-size: 19px;
+  font-size: 21px;
 }
 
 .mcp-guide-client-heading p {
   margin-top: 3px;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 13px;
   line-height: 1.45;
 }
 
@@ -1100,7 +1113,7 @@ svg {
   gap: 5px;
   flex: 0 0 auto;
   color: var(--sage-dark);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   text-decoration: none;
 }
@@ -1132,7 +1145,7 @@ svg {
 
 .mcp-guide-command-list article > header > strong {
   color: var(--ink-soft);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .mcp-guide-command-list pre {
@@ -1144,7 +1157,7 @@ svg {
   background: #202822;
   color: #edf5ef;
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.6;
   white-space: pre;
 }
@@ -1152,7 +1165,7 @@ svg {
 .mcp-guide-command-list article > p {
   margin: 8px 1px 0;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.5;
 }
 
@@ -1164,7 +1177,7 @@ svg {
   border-radius: 8px;
   background: var(--paper-deep);
   color: var(--muted);
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.55;
 }
 
@@ -1206,19 +1219,19 @@ svg {
   background: var(--sage-dark);
   color: white;
   font-family: var(--mono);
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 750;
 }
 
 .mcp-guide-oauth-steps strong {
   color: var(--ink-soft);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .mcp-guide-oauth-steps p {
   margin: 4px 0 0;
   color: var(--muted);
-  font-size: 9px;
+  font-size: 11px;
   line-height: 1.5;
 }
 
@@ -1236,7 +1249,7 @@ svg {
 .mcp-guide-permission-callout p {
   margin: 3px 0 0;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.55;
 }
 
@@ -1249,7 +1262,7 @@ svg {
 .mcp-guide-test-prompt p {
   margin: 0;
   color: var(--ink-soft);
-  font-size: 11px;
+  font-size: 13px;
   line-height: 1.5;
 }
 
@@ -1268,7 +1281,7 @@ svg {
   padding: 12px 14px;
   color: var(--ink-soft);
   cursor: pointer;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
 }
 
@@ -1279,7 +1292,7 @@ svg {
 .mcp-guide-troubleshooting p {
   margin: -3px 14px 12px;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.6;
 }
 
@@ -4629,7 +4642,7 @@ body.resizing-document-inspector * {
   }
 
   .mcp-guide-command-list pre {
-    font-size: 10px;
+    font-size: 12px;
   }
 
   .mcp-guide-oauth-steps {

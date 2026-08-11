@@ -130,6 +130,9 @@ type DocumentUploadEntry = {
   file: File;
   folderId: string | null;
 };
+type UploadPresentationOptions = {
+  openStatus?: boolean;
+};
 type UploadJobFilter = 'all' | 'running' | 'ready' | 'failed';
 const UPLOAD_PAGE_SIZES = [10, 30, 50] as const;
 type UploadPageSize = (typeof UPLOAD_PAGE_SIZES)[number];
@@ -183,6 +186,7 @@ const DOCUMENT_INSPECTOR_DEFAULT_WIDTH = 560;
 const DOCUMENT_INSPECTOR_MIN_WIDTH = 400;
 const DOCUMENT_INSPECTOR_MAX_VIEWPORT_RATIO = 0.74;
 const UPLOAD_STEPS = ['원본 업로드', '구조 추출', '벡터 색인', '완료'] as const;
+const SUPPORTED_FILE_ACCEPT = '.md,.markdown,.html,.htm,.txt,.pdf,.docx,.xlsx';
 
 const UPLOAD_STAGE_LABELS: Record<UploadJob['stage'], string> = {
   queued: '처리 대기 중',
@@ -509,6 +513,7 @@ export function DocumentRagApp({
   initialIngestionJobs,
   initialOAuthConnections,
   initialOAuthConnectionsError,
+  mcpEndpoint,
 }: {
   userEmail: string;
   initialDocuments: IndexedDocument[];
@@ -516,6 +521,7 @@ export function DocumentRagApp({
   initialIngestionJobs: DocumentIngestionJob[];
   initialOAuthConnections: OAuthConnectionSummary[];
   initialOAuthConnectionsError: boolean;
+  mcpEndpoint: string;
 }) {
   const [view, setView] = useState<View>('chat');
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
@@ -549,6 +555,8 @@ export function DocumentRagApp({
   const [activeSources, setActiveSources] = useState<SourceReference[]>([]);
   const [uploadMessage, setUploadMessage] = useState<string | null>(null);
   const [uploadBusy, setUploadBusy] = useState(false);
+  const [repositoryUploadFeedbackVisible, setRepositoryUploadFeedbackVisible] = useState(false);
+  const [repositoryUploadMenuOpen, setRepositoryUploadMenuOpen] = useState(false);
   const [uploadJobs, setUploadJobs] = useState<UploadJob[]>(() => (
     initialIngestionJobs.map(uploadJobFromRecord)
   ));
@@ -572,6 +580,9 @@ export function DocumentRagApp({
   const [system, setSystem] = useState<SystemStatus | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const folderInputRef = useRef<HTMLInputElement | null>(null);
+  const repositoryFileInputRef = useRef<HTMLInputElement | null>(null);
+  const repositoryFolderInputRef = useRef<HTMLInputElement | null>(null);
+  const repositoryUploadMenuRef = useRef<HTMLDivElement | null>(null);
   const retryFileInputRef = useRef<HTMLInputElement | null>(null);
   const conversationRef = useRef<HTMLDivElement | null>(null);
   const documentLayoutRef = useRef<HTMLDivElement | null>(null);
@@ -623,6 +634,28 @@ export function DocumentRagApp({
       document.removeEventListener('keydown', closeOnEscape);
     };
   }, [profileMenuOpen]);
+
+  useEffect(() => {
+    if (!repositoryUploadMenuOpen) return;
+
+    const closeOnOutsidePointer = (event: globalThis.PointerEvent) => {
+      if (
+        event.target instanceof Node
+        && repositoryUploadMenuRef.current?.contains(event.target)
+      ) return;
+      setRepositoryUploadMenuOpen(false);
+    };
+    const closeOnEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key === 'Escape') setRepositoryUploadMenuOpen(false);
+    };
+
+    document.addEventListener('pointerdown', closeOnOutsidePointer);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.removeEventListener('pointerdown', closeOnOutsidePointer);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [repositoryUploadMenuOpen]);
 
   useEffect(() => {
     if (view !== 'upload-status') return;
@@ -989,8 +1022,10 @@ export function DocumentRagApp({
     entries: DocumentUploadEntry[],
     selectedFolderAfterUpload: string | null,
     retryOfJobId: string | null = null,
+    options: UploadPresentationOptions = {},
   ) {
     if (!entries.length) return;
+    const openStatus = options.openStatus ?? true;
     const jobs = entries.map(({ file, folderId }) => {
       const id = crypto.randomUUID();
       const now = new Date().toISOString();
@@ -1026,7 +1061,8 @@ export function DocumentRagApp({
     setUploadJobs((current) => [...jobs.map(({ progress }) => progress), ...current]);
     setUploadBusy(true);
     setUploadMessage(null);
-    setView('upload-status');
+    setRepositoryUploadFeedbackVisible(!openStatus);
+    if (openStatus) setView('upload-status');
 
     const results = await Promise.allSettled(
       jobs.map(async ({ id, file, folderId }) => {
@@ -1073,7 +1109,7 @@ export function DocumentRagApp({
     );
 
     if (succeeded.length) {
-      setSelectedFolderId(selectedFolderAfterUpload);
+      if (openStatus) setSelectedFolderId(selectedFolderAfterUpload);
       setUploadMessage(
         system?.mode === 'cloud'
           ? `${succeeded.length}개 문서를 Supabase에 저장하고 Qdrant에 색인했습니다.`
@@ -1090,17 +1126,25 @@ export function DocumentRagApp({
     fileList: FileList | File[],
     folderId = selectedFolderId,
     retryOfJobId: string | null = null,
+    options: UploadPresentationOptions = {},
   ) {
     const files = Array.from(fileList);
     return handleUploadEntries(
       files.map((file) => ({ file, folderId })),
       folderId,
       retryOfJobId,
+      options,
     );
   }
 
-  async function handleFolderFiles(entries: FolderUploadEntry[]) {
+  async function handleFolderFiles(
+    entries: FolderUploadEntry[],
+    destinationFolderId = selectedFolderId,
+    options: UploadPresentationOptions = {},
+  ) {
     if (uploadBusy) return;
+    const openStatus = options.openStatus ?? true;
+    setRepositoryUploadFeedbackVisible(!openStatus);
     if (!entries.length) {
       setUploadMessage('실패: 선택한 폴더에 업로드할 파일이 없습니다.');
       return;
@@ -1111,7 +1155,7 @@ export function DocumentRagApp({
       const plan = buildFolderUploadPlan(entries);
       const ensured = await ensureFolderUploadTree({
         plan,
-        destinationFolderId: selectedFolderId,
+        destinationFolderId,
         existingFolders: folders,
         create: createFolder,
       });
@@ -1123,6 +1167,8 @@ export function DocumentRagApp({
           return { file, folderId };
         }),
         ensured.rootFolderId,
+        null,
+        options,
       );
     } catch (error) {
       setUploadBusy(false);
@@ -1518,14 +1564,30 @@ export function DocumentRagApp({
     }
   }
 
-  function handleFolderDrop(event: DragEvent<HTMLElement>, folderId: string | null) {
+  async function handleFolderDrop(event: DragEvent<HTMLElement>, folderId: string | null) {
     event.preventDefault();
     event.stopPropagation();
     setDragOverFolderId(null);
 
-    if (event.dataTransfer.files.length) {
-      setSelectedFolderId(folderId);
-      void handleFiles(event.dataTransfer.files, folderId);
+    if (event.dataTransfer.types.includes('Files')) {
+      const dataTransfer = event.dataTransfer;
+      setRepositoryUploadFeedbackVisible(true);
+      try {
+        const folderEntries = await folderUploadEntriesFromDrop(dataTransfer);
+        if (folderEntries) {
+          await handleFolderFiles(folderEntries, folderId, { openStatus: false });
+          return;
+        }
+        if (!dataTransfer.files.length) {
+          throw new Error('업로드할 파일을 읽지 못했습니다.');
+        }
+        await handleFiles(dataTransfer.files, folderId, null, { openStatus: false });
+      } catch (error) {
+        setUploadBusy(false);
+        setUploadMessage(
+          `실패: ${error instanceof Error ? error.message : '파일을 업로드하지 못했습니다.'}`,
+        );
+      }
       return;
     }
     const documentId = event.dataTransfer.getData(DOCUMENT_DRAG_TYPE);
@@ -1861,10 +1923,6 @@ export function DocumentRagApp({
                 <span className="eyebrow">KNOWLEDGE BASE</span>
                 <h1>문서 저장소</h1>
               </div>
-              <button className="primary-action" type="button" onClick={() => setView('upload')}>
-                <UploadCloud size={17} />
-                문서 추가
-              </button>
             </header>
 
             <div className="document-toolbar">
@@ -1996,6 +2054,47 @@ export function DocumentRagApp({
                     </p>
                   </div>
                   <div className="folder-actions">
+                    <div className="repository-upload-menu" ref={repositoryUploadMenuRef}>
+                      <button
+                        aria-expanded={repositoryUploadMenuOpen}
+                        aria-haspopup="menu"
+                        className="repository-upload-action"
+                        type="button"
+                        onClick={() => setRepositoryUploadMenuOpen((open) => !open)}
+                        disabled={uploadBusy}
+                        title={`${selectedFolder?.name ?? '내 문서'}에 업로드`}
+                      >
+                        {uploadBusy ? <LoaderCircle size={14} className="spin" /> : <HardDriveUpload size={14} />}
+                        업로드
+                        <ChevronDown size={13} />
+                      </button>
+                      {repositoryUploadMenuOpen ? (
+                        <div className="repository-upload-popover" role="menu">
+                          <button
+                            type="button"
+                            role="menuitem"
+                            onClick={() => {
+                              setRepositoryUploadMenuOpen(false);
+                              repositoryFileInputRef.current?.click();
+                            }}
+                          >
+                            <HardDriveUpload size={15} />
+                            <span><strong>파일 선택</strong><small>한 개 또는 여러 파일</small></span>
+                          </button>
+                          <button
+                            type="button"
+                            role="menuitem"
+                            onClick={() => {
+                              setRepositoryUploadMenuOpen(false);
+                              repositoryFolderInputRef.current?.click();
+                            }}
+                          >
+                            <FolderInput size={15} />
+                            <span><strong>폴더 전체</strong><small>하위 구조를 유지해 업로드</small></span>
+                          </button>
+                        </div>
+                      ) : null}
+                    </div>
                     <button type="button" onClick={() => void handleCreateFolder()} disabled={folderBusy}>
                       <FolderPlus size={14} /> 새 폴더
                     </button>
@@ -2009,10 +2108,82 @@ export function DocumentRagApp({
                         </button>
                       </>
                     ) : null}
+                    <input
+                      className="repository-upload-input"
+                      ref={repositoryFileInputRef}
+                      type="file"
+                      multiple
+                      accept={SUPPORTED_FILE_ACCEPT}
+                      aria-label="현재 폴더에 업로드할 파일 선택"
+                      onChange={(event) => {
+                        if (event.target.files) {
+                          void handleFiles(event.target.files, selectedFolderId, null, {
+                            openStatus: false,
+                          });
+                        }
+                        event.target.value = '';
+                      }}
+                    />
+                    <input
+                      className="repository-upload-input"
+                      ref={(input) => {
+                        repositoryFolderInputRef.current = input;
+                        input?.setAttribute('webkitdirectory', '');
+                      }}
+                      type="file"
+                      multiple
+                      accept={SUPPORTED_FILE_ACCEPT}
+                      aria-label="현재 폴더에 업로드할 폴더 선택"
+                      onChange={(event) => {
+                        if (event.target.files) {
+                          void handleFolderFiles(
+                            Array.from(event.target.files).map((file) => ({
+                              file,
+                              relativePath: file.webkitRelativePath,
+                            })),
+                            selectedFolderId,
+                            { openStatus: false },
+                          );
+                        }
+                        event.target.value = '';
+                      }}
+                    />
                   </div>
                 </div>
 
                 {folderActionError ? <p className="folder-action-error" role="alert">{folderActionError}</p> : null}
+                {repositoryUploadFeedbackVisible && (uploadBusy || uploadMessage) ? (
+                  <div
+                    className={`repository-upload-notice${
+                      uploadMessage?.includes('실패') ? ' error' : ''
+                    }`}
+                    role={uploadMessage?.includes('실패') ? 'alert' : 'status'}
+                  >
+                    {uploadBusy ? (
+                      <LoaderCircle size={16} className="spin" />
+                    ) : uploadMessage?.includes('실패') ? (
+                      <XCircle size={16} />
+                    ) : (
+                      <CheckCircle2 size={16} />
+                    )}
+                    <span>
+                      {uploadBusy
+                        ? `${selectedFolder?.name ?? '내 문서'}에 문서를 업로드하고 있습니다.`
+                        : uploadMessage}
+                    </span>
+                    <button type="button" onClick={() => setView('upload-status')}>처리 현황</button>
+                    {!uploadBusy ? (
+                      <button
+                        className="icon-only"
+                        type="button"
+                        aria-label="업로드 알림 닫기"
+                        onClick={() => setRepositoryUploadFeedbackVisible(false)}
+                      >
+                        <X size={14} />
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
 
                 <div className="repository-explorer-toolbar">
                   <div>
@@ -2056,7 +2227,11 @@ export function DocumentRagApp({
                     event.preventDefault();
                     setDragOverFolderId(selectedFolderId ?? 'root');
                   }}
-                  onDrop={(event) => handleFolderDrop(event, selectedFolderId)}
+                  onDragLeave={(event) => {
+                    if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+                    setDragOverFolderId(null);
+                  }}
+                  onDrop={(event) => void handleFolderDrop(event, selectedFolderId)}
                 >
                   <div className="repository-entry-header">
                     <label className="repository-selection-checkbox">
@@ -2284,7 +2459,7 @@ export function DocumentRagApp({
                   ref={fileInputRef}
                   type="file"
                   multiple
-                  accept=".md,.markdown,.html,.htm,.txt,.pdf,.docx,.xlsx"
+                  accept={SUPPORTED_FILE_ACCEPT}
                   onChange={(event) => {
                     if (event.target.files) void handleFiles(event.target.files);
                     event.target.value = '';
@@ -2297,7 +2472,7 @@ export function DocumentRagApp({
                   }}
                   type="file"
                   multiple
-                  accept=".md,.markdown,.html,.htm,.txt,.pdf,.docx,.xlsx"
+                  accept={SUPPORTED_FILE_ACCEPT}
                   aria-label="업로드할 폴더 선택"
                   onChange={(event) => {
                     if (event.target.files) {
@@ -2615,6 +2790,7 @@ export function DocumentRagApp({
       <OAuthConnectionsModal
         initialConnections={initialOAuthConnections}
         initialError={initialOAuthConnectionsError}
+        mcpEndpoint={mcpEndpoint}
         onClose={closeOAuthConnectionsModal}
         open={oauthConnectionsModalOpen}
       />

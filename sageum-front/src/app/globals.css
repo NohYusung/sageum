@@ -178,6 +178,10 @@ svg {
   line-height: 1.03;
 }
 
+.auth-title-nowrap {
+  white-space: nowrap;
+}
+
 .auth-story-copy p {
   max-width: 480px;
   margin: 0;

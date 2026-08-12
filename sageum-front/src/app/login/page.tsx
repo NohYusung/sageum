@@ -35,7 +35,9 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
 
         <div className="auth-story-copy">
           <span className="eyebrow">PRIVATE KNOWLEDGE, GROUNDED ANSWERS</span>
-          <h1 id="auth-title">사내 문서를<br />대화 가능한 지식으로.</h1>
+          <h1 id="auth-title">
+            사내 문서를<br />대화 가능한 <span className="auth-title-nowrap">지식으로.</span>
+          </h1>
           <p>문서를 안전하게 저장하고, 답변과 원문 근거를 한 화면에서 확인하는 개인용 RAG 저장소입니다.</p>
         </div>
 

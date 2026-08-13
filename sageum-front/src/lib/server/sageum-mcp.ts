@@ -58,10 +58,10 @@ export function createSageumMcpServer(access: McpRepositoryAccess) {
       topK: z.number().int().min(1).max(20).default(6).describe('반환할 최대 근거 수'),
     },
     annotations: readOnlyAnnotations(),
-  }, async ({ query, folderId, documentIds, topK }) => jsonToolResult({
-    query,
-    evidence: await searchMcpRepository(access, { query, folderId, documentIds, topK }),
-  }));
+  }, async ({ query, folderId, documentIds, topK }) => {
+    const result = await searchMcpRepository(access, { query, folderId, documentIds, topK });
+    return jsonToolResult({ query, ...result });
+  });
 
   server.registerTool('list_folders', {
     title: '폴더 목록',

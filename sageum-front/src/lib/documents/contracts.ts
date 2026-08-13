@@ -1,4 +1,5 @@
 import type { IndexedDocument, SourceReference } from '@/lib/rag/local-search';
+import type { AppliedRuleReference, DocumentKind } from '@/lib/relations/types';
 
 export type DocumentUploadTicket = {
   documentId: string;
@@ -37,6 +38,7 @@ export type DocumentIngestionJob = {
   versionId: string | null;
   retryOfJobId: string | null;
   folderId: string | null;
+  documentKind: DocumentKind;
   fileName: string;
   mimeType: string;
   sizeBytes: number;
@@ -92,6 +94,8 @@ export type SearchDocumentsResponse = {
   sources: SourceReference[];
   mode: 'qdrant';
   answerMode: 'claude-platform-aws' | 'extractive-fallback';
+  appliedRules: AppliedRuleReference[];
+  relationMode: 'expanded' | 'content-only' | 'fallback';
 };
 
 export type ApiErrorResponse = {

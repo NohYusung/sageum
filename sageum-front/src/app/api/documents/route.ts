@@ -6,6 +6,7 @@ import {
   createDocumentUpload,
   DocumentUploadInitializationError,
 } from '@/lib/server/document-upload';
+import { DOCUMENT_KINDS, type DocumentKind } from '@/lib/relations/types';
 
 export const runtime = 'nodejs';
 
@@ -15,6 +16,7 @@ type CreateDocumentBody = {
   sizeBytes?: unknown;
   folderId?: unknown;
   retryOfJobId?: unknown;
+  documentKind?: unknown;
 };
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
@@ -32,6 +34,18 @@ export async function POST(request: Request) {
 
   try {
     const folderId = parseFolderId(body.folderId, { optional: true });
+    const documentKind = body.documentKind === undefined
+      ? 'knowledge'
+      : typeof body.documentKind === 'string'
+        && DOCUMENT_KINDS.includes(body.documentKind as DocumentKind)
+        ? body.documentKind as DocumentKind
+        : null;
+    if (!documentKind) {
+      throw new DocumentValidationError('올바른 문서 종류가 필요합니다.');
+    }
+    if (documentKind === 'rule' && folderId) {
+      throw new DocumentValidationError('비즈니스 규칙 문서는 별도 영역에서 관리됩니다.');
+    }
     const retryOfJobId = body.retryOfJobId === undefined || body.retryOfJobId === null
       ? null
       : typeof body.retryOfJobId === 'string' && UUID_PATTERN.test(body.retryOfJobId)
@@ -47,6 +61,7 @@ export async function POST(request: Request) {
       sizeBytes: typeof body.sizeBytes === 'number' ? body.sizeBytes : Number.NaN,
       folderId,
       retryOfJobId,
+      documentKind,
     });
     const response = { upload } satisfies CreateDocumentUploadResponse;
     return Response.json(response, { status: 201 });

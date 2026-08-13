@@ -7,6 +7,7 @@ import {
   validateDocumentMetadata,
 } from '@/lib/documents/validation';
 import type { Database } from '@/lib/supabase/database.types';
+import type { DocumentKind } from '@/lib/relations/types';
 
 export type CreateDocumentUploadInput = {
   name: string;
@@ -14,6 +15,7 @@ export type CreateDocumentUploadInput = {
   sizeBytes: number;
   folderId?: string | null;
   retryOfJobId?: string | null;
+  documentKind?: DocumentKind;
 };
 
 export class DocumentUploadInitializationError extends Error {
@@ -65,6 +67,7 @@ export async function createDocumentUpload(
   const metadata = validateDocumentMetadata(input);
   const folderId = input.folderId ?? null;
   const retryOfJobId = input.retryOfJobId ?? null;
+  const documentKind = input.documentKind ?? 'knowledge';
   const documentId = randomUUID();
   const versionId = randomUUID();
   const jobId = randomUUID();
@@ -98,6 +101,7 @@ export async function createDocumentUpload(
   const { error: jobError } = await supabase.from('document_ingestion_jobs').insert({
     id: jobId,
     owner_id: ownerId,
+    document_kind: documentKind,
     retry_of_job_id: retryOfJobId,
     folder_id: folderId,
     file_name: metadata.name,
@@ -115,6 +119,7 @@ export async function createDocumentUpload(
   const { error: documentError } = await supabase.from('documents').insert({
     id: documentId,
     owner_id: ownerId,
+    document_kind: documentKind,
     folder_id: folderId,
     title: metadata.title,
     source_type: metadata.sourceType,

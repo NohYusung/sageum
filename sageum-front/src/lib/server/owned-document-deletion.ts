@@ -2,6 +2,7 @@ import { DOCUMENT_BUCKET } from '@/lib/documents/validation';
 import type { AuthenticatedRequestContext } from '@/lib/server/api-auth';
 import { cleanupDocumentDeletion, type DocumentDeletionJob } from '@/lib/server/document-deletion';
 import { getProviderConfiguration } from '@/lib/server/env';
+import { getQdrantRelationVectorStore } from '@/lib/server/relation-vector-store';
 import { getQdrantVectorStore } from '@/lib/server/qdrant-store';
 
 export class OwnedDocumentDeletionError extends Error {
@@ -52,7 +53,10 @@ export async function deleteOwnedDocument(
     await cleanupDocumentDeletion(job, {
       deleteVectors: async () => {
         if (providers.qdrant.configured) {
-          await getQdrantVectorStore().deleteByDocument(context.ownerId, documentId);
+          await Promise.all([
+            getQdrantVectorStore().deleteByDocument(context.ownerId, documentId),
+            getQdrantRelationVectorStore().deleteByRuleDocument(context.ownerId, documentId),
+          ]);
           return;
         }
         if (job.requiresVectorCleanup) {

@@ -8,6 +8,7 @@ import {
   listIndexedDocuments,
 } from '@/lib/server/document-repository';
 import { listOAuthConnections } from '@/lib/server/oauth-connections';
+import { listRuleDocuments } from '@/lib/server/knowledge-relations-repository';
 import { createClient } from '@/lib/supabase/server';
 
 async function currentSiteUrl() {
@@ -32,11 +33,13 @@ export default async function Home() {
     initialFolders,
     initialIngestionJobs,
     initialOAuthConnections,
+    initialRuleDocuments,
   ] = await Promise.all([
     listIndexedDocuments(supabase, claims.sub),
     listFolders(supabase, claims.sub),
     listDocumentIngestionJobs(supabase, claims.sub),
     listOAuthConnections(supabase, claims.sub),
+    listRuleDocuments(supabase, claims.sub),
   ]);
   const userEmail = typeof claims.email === 'string' ? claims.email : '로그인 사용자';
   const mcpEndpoint = buildSageumMcpEndpoint(await currentSiteUrl());
@@ -48,6 +51,7 @@ export default async function Home() {
       initialIngestionJobs={initialIngestionJobs}
       initialOAuthConnections={initialOAuthConnections.connections}
       initialOAuthConnectionsError={initialOAuthConnections.error}
+      initialRuleDocuments={initialRuleDocuments}
       mcpEndpoint={mcpEndpoint}
     />
   );

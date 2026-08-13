@@ -42,6 +42,7 @@ export type NormalizedBlock = {
 export type NormalizedDocument = {
   id: string;
   versionId: string;
+  documentKind?: 'knowledge' | 'rule';
   folderId?: string | null;
   sortOrder?: number;
   name: string;

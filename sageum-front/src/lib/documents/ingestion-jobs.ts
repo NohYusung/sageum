@@ -55,6 +55,7 @@ export function mapStoredIngestionJob(row: StoredIngestionJob): DocumentIngestio
     versionId: row.version_id,
     retryOfJobId: row.retry_of_job_id,
     folderId: row.folder_id,
+    documentKind: row.document_kind === 'rule' ? 'rule' : 'knowledge',
     fileName: row.file_name,
     mimeType: row.mime_type,
     sizeBytes: row.size_bytes,

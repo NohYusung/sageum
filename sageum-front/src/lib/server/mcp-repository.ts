@@ -1,5 +1,4 @@
 import { createClient } from '@supabase/supabase-js';
-import { descendantFolderIds } from '@/lib/folders/tree';
 import { DOCUMENT_BUCKET } from '@/lib/documents/validation';
 import { ORIGINAL_PREVIEW_URL_TTL_SECONDS } from '@/lib/documents/original-access';
 import type { Database } from '@/lib/supabase/database.types';
@@ -7,7 +6,7 @@ import { findOwnedOriginalDocument } from './document-original';
 import { createDocumentUpload } from './document-upload';
 import { startDocumentIngestionWorkflow } from './document-ingestion-workflow';
 import { getProviderConfiguration, requireServerEnvironment } from './env';
-import { getQdrantVectorStore } from './qdrant-store';
+import { searchRelationAwareRepository } from './relation-aware-search';
 import { getSupabaseAdminClient } from './supabase';
 
 export type McpRepositoryAccess = {
@@ -32,11 +31,6 @@ function getMcpSupabaseClient(accessToken: string) {
   );
 }
 
-function scoreThreshold() {
-  const value = Number.parseFloat(process.env.QDRANT_SCORE_THRESHOLD?.trim() ?? '0.2');
-  return Number.isFinite(value) && value >= 0 ? value : 0.2;
-}
-
 export type McpRepositorySearchInput = {
   query: string;
   folderId?: string;
@@ -51,82 +45,15 @@ export async function searchMcpRepository(access: McpRepositoryAccess, input: Mc
     throw new Error('Qdrant Cloud Inference 환경 설정이 필요합니다.');
   }
   const supabase = getMcpSupabaseClient(access.accessToken);
-  let documentIds = input.documentIds ?? [];
-
-  if (input.folderId) {
-    const [foldersResult, documentsResult] = await Promise.all([
-      supabase
-        .from('folders')
-        .select('id,parent_id,name,sort_order,created_at,updated_at')
-        .eq('owner_id', ownerId),
-      supabase
-        .from('documents')
-        .select('id,folder_id')
-        .eq('owner_id', ownerId)
-        .eq('deletion_status', 'active'),
-    ]);
-    if (foldersResult.error || documentsResult.error) {
-      throw new Error('폴더 검색 범위를 확인하지 못했습니다.');
-    }
-    const folders = foldersResult.data.map((folder) => ({
-      id: folder.id,
-      parentId: folder.parent_id,
-      name: folder.name,
-      sortOrder: folder.sort_order,
-      createdAt: folder.created_at,
-      updatedAt: folder.updated_at,
-    }));
-    if (!folders.some((folder) => folder.id === input.folderId)) {
-      throw new Error('검색할 폴더를 찾을 수 없습니다.');
-    }
-    const folderIds = descendantFolderIds(folders, input.folderId);
-    const scopedDocumentIds = documentsResult.data
-      .filter((document) => document.folder_id && folderIds.has(document.folder_id))
-      .map((document) => document.id);
-    documentIds = documentIds.length
-      ? documentIds.filter((documentId) => scopedDocumentIds.includes(documentId))
-      : scopedDocumentIds;
-    if (!documentIds.length) return [];
-  }
-
-  const vectorStore = getQdrantVectorStore();
-  await vectorStore.ensureCollection(configuration.embedding.dimensions);
   const topK = Math.min(Math.max(input.topK ?? 6, 1), 20);
-  const results = await vectorStore.query(input.query, ownerId, {
-    limit: Math.min(topK * 2, 40),
-    documentIds,
-    scoreThreshold: scoreThreshold(),
-    embeddingModel: configuration.embedding.model,
+  return searchRelationAwareRepository({
+    ownerId,
+    supabase,
+    query: input.query,
+    folderId: input.folderId,
+    documentIds: input.documentIds,
+    topK,
   });
-  const resultDocumentIds = [...new Set(results.map((result) => result.documentId).filter(Boolean))];
-  if (!resultDocumentIds.length) return [];
-
-  const { data: activeDocuments, error } = await supabase
-    .from('documents')
-    .select('id')
-    .eq('owner_id', ownerId)
-    .eq('deletion_status', 'active')
-    .in('id', resultDocumentIds);
-  if (error) throw new Error('활성 문서 상태를 확인하지 못했습니다.');
-  const activeDocumentIds = new Set(activeDocuments.map((document) => document.id));
-
-  return results
-    .filter((result) => activeDocumentIds.has(result.documentId))
-    .slice(0, topK)
-    .map((result) => ({
-      documentId: result.documentId,
-      versionId: result.versionId,
-      chunkId: result.chunkId,
-      documentTitle: result.documentTitle || '문서',
-      sourceType: result.sourceType,
-      heading: result.headingPath.join(' › ') || '본문',
-      content: result.text,
-      score: result.score,
-      page: result.page,
-      sheet: result.sheet,
-      cellRange: result.cellRange,
-      imageIndex: result.imageIndex,
-    }));
 }
 
 export async function listMcpFolders(access: McpRepositoryAccess) {
@@ -153,6 +80,7 @@ export async function listMcpDocuments(access: McpRepositoryAccess, folderId?: s
     .select('id,title,source_type,folder_id,latest_version_id,created_at,updated_at,deletion_status')
     .eq('owner_id', access.ownerId)
     .eq('deletion_status', 'active')
+    .eq('document_kind', 'knowledge')
     .order('sort_order', { ascending: true })
     .order('title', { ascending: true });
   query = folderId ? query.eq('folder_id', folderId) : query.is('folder_id', null);

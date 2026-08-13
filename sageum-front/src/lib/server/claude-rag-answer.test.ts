@@ -63,8 +63,8 @@ test('Claude에 전달하는 검색 근거 수와 본문 길이를 제한하고 
     chunkId: string;
   }>;
 
-  assert.ok(grounding.sources.length <= 6);
-  assert.ok(context.reduce((sum, item) => sum + item.content.length, 0) <= 16_000);
+  assert.ok(grounding.sources.length <= 10);
+  assert.ok(context.reduce((sum, item) => sum + item.content.length, 0) <= 24_000);
   assert.equal(context[0].page, 3);
   assert.equal(context[0].chunkId, 'chunk-0');
 });

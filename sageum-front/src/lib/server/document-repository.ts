@@ -39,6 +39,7 @@ export async function listIndexedDocuments(
     .from('documents')
     .select('*')
     .eq('owner_id', ownerId)
+    .eq('document_kind', 'knowledge')
     .not('latest_version_id', 'is', null)
     .order('updated_at', { ascending: false });
 

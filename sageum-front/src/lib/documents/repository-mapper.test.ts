@@ -11,6 +11,7 @@ const document: StoredDocument = {
   id: 'document-id',
   owner_id: 'owner-id',
   deletion_status: 'active',
+  document_kind: 'knowledge',
   folder_id: null,
   title: '운영 정책',
   source_type: 'markdown',

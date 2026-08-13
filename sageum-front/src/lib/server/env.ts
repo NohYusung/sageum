@@ -1,6 +1,7 @@
 export const DEFAULT_QDRANT_INFERENCE_MODEL = 'intfloat/multilingual-e5-small';
 export const DEFAULT_QDRANT_INFERENCE_DIMENSIONS = 384;
 export const DEFAULT_QDRANT_COLLECTION = 'document_chunks_qdrant_hybrid_v2';
+export const DEFAULT_QDRANT_RELATION_COLLECTION = 'knowledge_relations_qdrant_v1';
 export const DEFAULT_CLAUDE_AWS_MODEL = 'claude-haiku-4-5';
 
 export type ProviderConfiguration = {
@@ -10,6 +11,7 @@ export type ProviderConfiguration = {
   qdrant: {
     configured: boolean;
     collection: string;
+    relationCollection: string;
   };
   embedding: {
     configured: boolean;
@@ -66,6 +68,7 @@ export function getProviderConfiguration(): ProviderConfiguration {
     qdrant: {
       configured: qdrantConfigured,
       collection: value('QDRANT_COLLECTION') ?? DEFAULT_QDRANT_COLLECTION,
+      relationCollection: value('QDRANT_RELATION_COLLECTION') ?? DEFAULT_QDRANT_RELATION_COLLECTION,
     },
     embedding: {
       configured: qdrantConfigured && Boolean(model),

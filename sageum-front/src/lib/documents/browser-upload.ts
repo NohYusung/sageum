@@ -14,6 +14,7 @@ import type {
 import type { IndexedDocument } from '@/lib/rag/local-search';
 import { createClient } from '@/lib/supabase/client';
 import { DOCUMENT_BUCKET } from './validation';
+import type { DocumentKind } from '@/lib/relations/types';
 
 export type DocumentUploadStage = 'creating' | DocumentIngestionStage;
 
@@ -134,6 +135,7 @@ export async function uploadAndProcessDocument(
   folderId: string | null = null,
   onProgress?: (progress: DocumentUploadProgress) => void,
   retryOfJobId: string | null = null,
+  documentKind: DocumentKind = 'knowledge',
 ): Promise<IndexedDocument> {
   onProgress?.({ stage: 'creating' });
   const createResponse = await fetch('/api/documents', {
@@ -145,6 +147,7 @@ export async function uploadAndProcessDocument(
       sizeBytes: file.size,
       folderId,
       retryOfJobId,
+      documentKind,
     }),
   });
   const { upload } = await responseJson<CreateDocumentUploadResponse>(createResponse);

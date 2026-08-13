@@ -129,6 +129,7 @@ export type Database = {
           completed_at: string | null;
           created_at: string;
           document_id: string | null;
+          document_kind: string;
           file_name: string;
           folder_id: string | null;
           id: string;
@@ -153,6 +154,7 @@ export type Database = {
           completed_at?: string | null;
           created_at?: string;
           document_id?: string | null;
+          document_kind?: string;
           file_name: string;
           folder_id?: string | null;
           id?: string;
@@ -177,6 +179,7 @@ export type Database = {
           completed_at?: string | null;
           created_at?: string;
           document_id?: string | null;
+          document_kind?: string;
           file_name?: string;
           folder_id?: string | null;
           id?: string;
@@ -214,6 +217,146 @@ export type Database = {
             columns: ['version_id'];
             isOneToOne: false;
             referencedRelation: 'document_versions';
+            referencedColumns: ['id'];
+          },
+        ];
+      };
+      knowledge_rule_bindings: {
+        Row: {
+          chunk_id: string;
+          chunk_text: string;
+          created_at: string;
+          document_id: string;
+          id: string;
+          owner_id: string;
+          rule_id: string;
+          updated_at: string;
+          vector_score: number;
+          version_id: string;
+        };
+        Insert: {
+          chunk_id: string;
+          chunk_text: string;
+          created_at?: string;
+          document_id: string;
+          id?: string;
+          owner_id: string;
+          rule_id: string;
+          updated_at?: string;
+          vector_score: number;
+          version_id: string;
+        };
+        Update: {
+          chunk_id?: string;
+          chunk_text?: string;
+          created_at?: string;
+          document_id?: string;
+          id?: string;
+          owner_id?: string;
+          rule_id?: string;
+          updated_at?: string;
+          vector_score?: number;
+          version_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'knowledge_rule_bindings_rule_owner_fkey';
+            columns: ['rule_id', 'owner_id'];
+            isOneToOne: false;
+            referencedRelation: 'knowledge_rules';
+            referencedColumns: ['id', 'owner_id'];
+          },
+          {
+            foreignKeyName: 'knowledge_rule_bindings_version_document_owner_fkey';
+            columns: ['version_id', 'document_id', 'owner_id'];
+            isOneToOne: false;
+            referencedRelation: 'document_versions';
+            referencedColumns: ['id', 'document_id', 'owner_id'];
+          },
+          {
+            foreignKeyName: 'knowledge_rule_bindings_chunk_fkey';
+            columns: ['chunk_id'];
+            isOneToOne: false;
+            referencedRelation: 'document_chunks';
+            referencedColumns: ['id'];
+          },
+        ];
+      };
+      knowledge_rules: {
+        Row: {
+          confidence: number;
+          created_at: string;
+          enabled: boolean;
+          evidence_end_offset: number;
+          evidence_quote: string;
+          evidence_start_offset: number;
+          extraction_model: string;
+          extraction_version: string;
+          id: string;
+          ordinal: number;
+          owner_id: string;
+          rule_document_id: string;
+          rule_version_id: string;
+          source_chunk_id: string;
+          statement: string;
+          updated_at: string;
+        };
+        Insert: {
+          confidence: number;
+          created_at?: string;
+          enabled?: boolean;
+          evidence_end_offset: number;
+          evidence_quote: string;
+          evidence_start_offset: number;
+          extraction_model: string;
+          extraction_version: string;
+          id?: string;
+          ordinal: number;
+          owner_id: string;
+          rule_document_id: string;
+          rule_version_id: string;
+          source_chunk_id: string;
+          statement: string;
+          updated_at?: string;
+        };
+        Update: {
+          confidence?: number;
+          created_at?: string;
+          enabled?: boolean;
+          evidence_end_offset?: number;
+          evidence_quote?: string;
+          evidence_start_offset?: number;
+          extraction_model?: string;
+          extraction_version?: string;
+          id?: string;
+          ordinal?: number;
+          owner_id?: string;
+          rule_document_id?: string;
+          rule_version_id?: string;
+          source_chunk_id?: string;
+          statement?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'knowledge_rules_rule_document_owner_fkey';
+            columns: ['rule_document_id', 'owner_id'];
+            isOneToOne: false;
+            referencedRelation: 'rule_documents';
+            referencedColumns: ['document_id', 'owner_id'];
+          },
+          {
+            foreignKeyName: 'knowledge_rules_rule_version_document_owner_fkey';
+            columns: ['rule_version_id', 'rule_document_id', 'owner_id'];
+            isOneToOne: false;
+            referencedRelation: 'document_versions';
+            referencedColumns: ['id', 'document_id', 'owner_id'];
+          },
+          {
+            foreignKeyName: 'knowledge_rules_source_chunk_fkey';
+            columns: ['source_chunk_id'];
+            isOneToOne: false;
+            referencedRelation: 'document_chunks';
             referencedColumns: ['id'];
           },
         ];
@@ -299,6 +442,7 @@ export type Database = {
         Row: {
           created_at: string;
           deletion_status: string;
+          document_kind: string;
           folder_id: string | null;
           id: string;
           latest_version_id: string | null;
@@ -311,6 +455,7 @@ export type Database = {
         Insert: {
           created_at?: string;
           deletion_status?: string;
+          document_kind?: string;
           folder_id?: string | null;
           id?: string;
           latest_version_id?: string | null;
@@ -323,6 +468,7 @@ export type Database = {
         Update: {
           created_at?: string;
           deletion_status?: string;
+          document_kind?: string;
           folder_id?: string | null;
           id?: string;
           latest_version_id?: string | null;
@@ -338,6 +484,56 @@ export type Database = {
             columns: ['folder_id', 'owner_id'];
             isOneToOne: false;
             referencedRelation: 'folders';
+            referencedColumns: ['id', 'owner_id'];
+          },
+        ];
+      };
+      rule_documents: {
+        Row: {
+          created_at: string;
+          document_id: string;
+          enabled: boolean;
+          extracted_at: string | null;
+          extraction_error: string | null;
+          extraction_status: string;
+          extraction_warning: string | null;
+          manual_content: string | null;
+          owner_id: string;
+          source_mode: string;
+          updated_at: string;
+        };
+        Insert: {
+          created_at?: string;
+          document_id: string;
+          enabled?: boolean;
+          extracted_at?: string | null;
+          extraction_error?: string | null;
+          extraction_status?: string;
+          extraction_warning?: string | null;
+          manual_content?: string | null;
+          owner_id: string;
+          source_mode?: string;
+          updated_at?: string;
+        };
+        Update: {
+          created_at?: string;
+          document_id?: string;
+          enabled?: boolean;
+          extracted_at?: string | null;
+          extraction_error?: string | null;
+          extraction_status?: string;
+          extraction_warning?: string | null;
+          manual_content?: string | null;
+          owner_id?: string;
+          source_mode?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'rule_documents_document_owner_fkey';
+            columns: ['document_id', 'owner_id'];
+            isOneToOne: true;
+            referencedRelation: 'documents';
             referencedColumns: ['id', 'owner_id'];
           },
         ];
@@ -457,6 +653,22 @@ export type Database = {
           requires_vector_cleanup: boolean;
           storage_paths: string[];
         }[];
+      };
+      replace_knowledge_rule_extraction: {
+        Args: {
+          p_bindings: Json;
+          p_owner_id: string;
+          p_rule_document_id: string;
+          p_rule_version_id: string;
+          p_rules: Json;
+          p_document_source_type?: string | null;
+          p_document_title?: string | null;
+          p_manual_content?: string | null;
+          p_preserve_rule_enabled?: boolean;
+          p_source_mode?: string;
+          p_warning?: string | null;
+        };
+        Returns: undefined;
       };
     };
     Enums: {

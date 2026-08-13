@@ -20,6 +20,8 @@ export type SourceReference = {
   cellRange?: string;
   imageIndex?: number;
   sourceSpans: DocumentSourceSpan[];
+  retrievalRole?: 'seed' | 'rule' | 'expanded';
+  ruleId?: string;
 };
 
 function queryTerms(query: string) {

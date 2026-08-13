@@ -49,6 +49,7 @@ export function mapStoredDocument(
     document: {
       id: document.id,
       versionId: version.id,
+      documentKind: document.document_kind === 'rule' ? 'rule' : 'knowledge',
       name: version.original_filename,
       title: document.title,
       mimeType: version.mime_type,

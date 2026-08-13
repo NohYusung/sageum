@@ -11,6 +11,13 @@ import {
 import { cleanupFailedDocumentVersion } from '@/lib/server/document-processing-failure';
 import { getIndexedDocument } from '@/lib/server/document-repository';
 import { getProviderConfiguration } from '@/lib/server/env';
+import { BusinessRuleExtractionRequestError } from '@/lib/server/business-rule-extraction';
+import {
+  BusinessRuleProcessingError,
+  processBusinessRuleDocument,
+  refreshBindingsForKnowledgeDocument,
+} from '@/lib/server/knowledge-rule-service';
+import { getQdrantRelationVectorStore } from '@/lib/server/relation-vector-store';
 import {
   getQdrantVectorStore,
   QdrantConfigurationError,
@@ -65,7 +72,9 @@ function publicProcessingError(error: unknown) {
     || error instanceof DocumentValidationError
     || error instanceof DocumentParsingError
     || error instanceof QdrantConfigurationError
-    || error instanceof QdrantInferenceError;
+    || error instanceof QdrantInferenceError
+    || error instanceof BusinessRuleExtractionRequestError
+    || error instanceof BusinessRuleProcessingError;
   const message = known ? error.message : '문서 처리에 실패했습니다.';
   const status = error instanceof ProcessingError
     ? error.status
@@ -73,7 +82,11 @@ function publicProcessingError(error: unknown) {
       ? 503
       : error instanceof QdrantInferenceError
         ? 502
-        : error instanceof DocumentValidationError || error instanceof DocumentParsingError
+        : error instanceof BusinessRuleExtractionRequestError
+          ? 500
+        : error instanceof DocumentValidationError
+          || error instanceof DocumentParsingError
+          || error instanceof BusinessRuleProcessingError
           ? 422
           : 500;
   const retryable = error instanceof QdrantInferenceError
@@ -216,7 +229,11 @@ export async function processDocumentIngestion(
 
   let vectorStore: ReturnType<typeof getQdrantVectorStore> | null = null;
   let vectorIndexStarted = false;
+  let relationIndexStarted = false;
+  let documentKind: 'knowledge' | 'rule' = 'knowledge';
   let originalAvailability: boolean | null = null;
+  let preserveRuleOnFailure = false;
+  let ruleCommitCompleted = false;
   try {
     const [documentResult, versionResult] = await Promise.all([
       supabase
@@ -242,8 +259,24 @@ export async function processDocumentIngestion(
     if (documentResult.data.deletion_status === 'deleting') {
       throw new ProcessingError('삭제 중인 문서는 다시 처리할 수 없습니다.', 409);
     }
+    documentKind = documentResult.data.document_kind === 'rule' ? 'rule' : 'knowledge';
 
     const version = versionResult.data;
+    const storedVersionMetadata = version.metadata && typeof version.metadata === 'object' && !Array.isArray(version.metadata)
+      ? version.metadata as Record<string, unknown>
+      : {};
+    const ruleSourceMode = storedVersionMetadata.ruleSourceMode === 'manual' ? 'manual' : 'upload';
+    const pendingManualContent = ruleSourceMode === 'manual'
+      && typeof storedVersionMetadata.manualContent === 'string'
+      ? storedVersionMetadata.manualContent
+      : null;
+    const manualDocumentTitle = ruleSourceMode === 'manual'
+      && typeof storedVersionMetadata.manualTitle === 'string'
+      ? storedVersionMetadata.manualTitle
+      : null;
+    preserveRuleOnFailure = documentKind === 'rule'
+      && Boolean(documentResult.data.latest_version_id)
+      && documentResult.data.latest_version_id !== execution.versionId;
     const expectedPathPrefix = `${execution.ownerId}/${execution.documentId}/${execution.versionId}/`;
     if (!version.storage_path.startsWith(expectedPathPrefix)) {
       throw new ProcessingError('문서 저장 경로가 올바르지 않습니다.', 403);
@@ -300,6 +333,9 @@ export async function processDocumentIngestion(
 
     const providers = getProviderConfiguration();
     const vectorIndexEnabled = providers.embedding.configured && providers.qdrant.configured;
+    if (documentKind === 'rule' && !vectorIndexEnabled) {
+      throw new ProcessingError('규칙 문서 처리에는 Qdrant Cloud Inference 설정이 필요합니다.', 503);
+    }
     if (vectorIndexEnabled) {
       const indexingStartedAt = new Date().toISOString();
       const { error: indexingStatusError } = await supabase
@@ -316,17 +352,19 @@ export async function processDocumentIngestion(
       }
       await updateIngestionJob(supabase, execution.ownerId, execution.jobId, { stage: 'indexing' });
 
-      vectorStore = getQdrantVectorStore();
-      await vectorStore.ensureCollection(providers.embedding.dimensions);
-      vectorIndexStarted = true;
-      await vectorStore.deleteByVersion(execution.ownerId, execution.versionId);
-      await vectorStore.upsert(chunks.map((chunk) => ({
-        chunk,
-        ownerId: execution.ownerId,
-        sourceType: parsed.sourceType,
-        documentTitle: parsed.title,
-        embeddingModel: providers.embedding.model,
-      })));
+      if (documentKind === 'knowledge') {
+        vectorStore = getQdrantVectorStore();
+        await vectorStore.ensureCollection(providers.embedding.dimensions);
+        vectorIndexStarted = true;
+        await vectorStore.deleteByVersion(execution.ownerId, execution.versionId);
+        await vectorStore.upsert(chunks.map((chunk) => ({
+          chunk,
+          ownerId: execution.ownerId,
+          sourceType: parsed.sourceType,
+          documentTitle: manualDocumentTitle ?? parsed.title,
+          embeddingModel: providers.embedding.model,
+        })));
+      }
     }
 
     const { error: clearChunksError } = await supabase
@@ -363,17 +401,53 @@ export async function processDocumentIngestion(
     if (chunksError) throw new ProcessingError('문서 청크를 저장하지 못했습니다.');
 
     const processedAt = new Date().toISOString();
-    const { error: documentUpdateError } = await supabase
-      .from('documents')
-      .update({
-        title: parsed.title,
-        source_type: parsed.sourceType,
-        latest_version_id: execution.versionId,
-        updated_at: processedAt,
-      })
-      .eq('id', execution.documentId)
-      .eq('owner_id', execution.ownerId);
-    if (documentUpdateError) throw new ProcessingError('문서 메타데이터를 갱신하지 못했습니다.');
+    if (documentKind === 'knowledge') {
+      const { error: documentUpdateError } = await supabase
+        .from('documents')
+        .update({
+          title: parsed.title,
+          source_type: parsed.sourceType,
+          latest_version_id: execution.versionId,
+          updated_at: processedAt,
+        })
+        .eq('id', execution.documentId)
+        .eq('owner_id', execution.ownerId);
+      if (documentUpdateError) throw new ProcessingError('문서 메타데이터를 갱신하지 못했습니다.');
+    }
+
+    let ruleProcessing: Awaited<ReturnType<typeof processBusinessRuleDocument>> | null = null;
+    let bindingRefreshWarning: string | null = null;
+    if (documentKind === 'rule') {
+      ruleProcessing = await processBusinessRuleDocument(
+        supabase,
+        execution.ownerId,
+        execution.documentId,
+        execution.versionId,
+        chunks,
+        {
+          sourceMode: ruleSourceMode,
+          manualContent: pendingManualContent,
+          documentTitle: parsed.title,
+          documentSourceType: parsed.sourceType,
+          preserveExistingOnFailure: preserveRuleOnFailure,
+        },
+      );
+      relationIndexStarted = true;
+      ruleCommitCompleted = true;
+    } else if (vectorIndexEnabled) {
+      try {
+        await refreshBindingsForKnowledgeDocument(
+          supabase,
+          execution.ownerId,
+          execution.documentId,
+        );
+      } catch (bindingError) {
+        bindingRefreshWarning = bindingError instanceof Error
+          ? bindingError.message
+          : '활성 규칙의 증분 바인딩 갱신에 실패했습니다.';
+        console.error('Knowledge rule incremental binding refresh failed', bindingError);
+      }
+    }
 
     const versionMetadata = {
       blockCount: parsed.blocks.length,
@@ -382,7 +456,11 @@ export async function processDocumentIngestion(
       parser: parserVersion(parsed.sourceType),
       processedAt,
       processingStartedAt: startedAt,
-      vectorIndexed: vectorIndexEnabled,
+      documentKind,
+      vectorIndexed: vectorIndexEnabled && documentKind === 'knowledge',
+      relationVectorIndexed: documentKind === 'rule',
+      ruleProcessing,
+      bindingRefreshWarning,
       embeddingProvider: vectorIndexEnabled ? providers.embedding.provider : null,
       embeddingModel: vectorIndexEnabled ? providers.embedding.model : null,
       embeddingDimensions: vectorIndexEnabled ? providers.embedding.dimensions : null,
@@ -402,16 +480,24 @@ export async function processDocumentIngestion(
       })
       .eq('id', execution.versionId)
       .eq('owner_id', execution.ownerId);
-    if (versionUpdateError) throw new ProcessingError('문서 처리 결과를 확정하지 못했습니다.');
+    if (versionUpdateError) {
+      if (!ruleCommitCompleted) throw new ProcessingError('문서 처리 결과를 확정하지 못했습니다.');
+      console.error('Failed to finalize committed rule document version', versionUpdateError);
+    }
 
-    await updateIngestionJob(supabase, execution.ownerId, execution.jobId, {
-      status: 'ready',
-      stage: 'ready',
-      original_available: true,
-      last_error: null,
-      completed_at: processedAt,
-      processing_token: null,
-    });
+    try {
+      await updateIngestionJob(supabase, execution.ownerId, execution.jobId, {
+        status: 'ready',
+        stage: 'ready',
+        original_available: true,
+        last_error: null,
+        completed_at: processedAt,
+        processing_token: null,
+      });
+    } catch (jobFinalizationError) {
+      if (!ruleCommitCompleted) throw jobFinalizationError;
+      console.error('Failed to finalize committed rule ingestion job', jobFinalizationError);
+    }
 
     return {
       document: {
@@ -432,7 +518,32 @@ export async function processDocumentIngestion(
         console.error('Failed to clean up Qdrant points after processing failure', cleanupError);
       }
     }
+    if ((relationIndexStarted || documentKind === 'rule') && !preserveRuleOnFailure) {
+      try {
+        await getQdrantRelationVectorStore().deleteByRuleDocument(
+          execution.ownerId,
+          execution.documentId,
+        );
+      } catch (cleanupError) {
+        console.error('Failed to clean relation vectors after processing failure', cleanupError);
+      }
+    }
     console.error('Document processing failed', error);
+    if (documentKind === 'rule' && !preserveRuleOnFailure) {
+      const ruleFailure = publicProcessingError(error);
+      const { error: ruleFailureError } = await supabase.from('rule_documents').upsert({
+        document_id: execution.documentId,
+        owner_id: execution.ownerId,
+        extraction_status: 'failed',
+        extraction_error: ruleFailure.message.slice(0, 500),
+        extraction_warning: null,
+        extracted_at: null,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'document_id' });
+      if (ruleFailureError) {
+        console.error('Failed to mark rule document extraction as failed', ruleFailureError);
+      }
+    }
     const failure = await markProcessingFailure(
       supabase,
       execution,

@@ -20,11 +20,13 @@ import {
   Home,
   HardDriveUpload,
   Library,
+  List,
   Link2,
   ListChecks,
   LoaderCircle,
   LogOut,
   MessageSquareText,
+  Network,
   Paperclip,
   Pencil,
   Search,
@@ -50,6 +52,8 @@ import {
 } from 'react';
 import { logoutAction } from '@/app/actions';
 import { OAuthConnectionsModal } from '@/components/oauth-connections-modal';
+import { BusinessRulesView } from '@/components/business-rules-view';
+import { KnowledgeGraphView } from '@/components/knowledge-graph-view';
 import type { OAuthConnectionSummary } from '@/lib/auth/oauth-connections';
 import {
   cleanupFailedIngestionJob,
@@ -105,8 +109,10 @@ import {
   type SourceReference,
 } from '@/lib/rag/local-search';
 import type { DocumentChunk } from '@/lib/rag/types';
+import type { RuleDocumentSummary } from '@/lib/relations/types';
 
-type View = 'chat' | 'documents' | 'upload' | 'upload-status';
+type View = 'chat' | 'documents' | 'rules' | 'upload' | 'upload-status';
+type DocumentViewMode = 'list' | 'graph';
 type InspectorResizeStart = {
   pointerId: number;
   clientX: number;
@@ -262,6 +268,12 @@ function sourceLocation(source: SourceReference) {
   if (source.sheet) return source.cellRange ? `${source.sheet} · ${source.cellRange}` : source.sheet;
   if (source.imageIndex !== undefined) return `이미지 ${source.imageIndex}`;
   return null;
+}
+
+function retrievalRoleLabel(role: SourceReference['retrievalRole']) {
+  if (role === 'rule') return '관계 규칙';
+  if (role === 'expanded') return '확장 근거';
+  return '직접 근거';
 }
 
 function chunkRangeLabel(chunk: DocumentChunk) {
@@ -513,6 +525,7 @@ export function DocumentRagApp({
   initialIngestionJobs,
   initialOAuthConnections,
   initialOAuthConnectionsError,
+  initialRuleDocuments,
   mcpEndpoint,
 }: {
   userEmail: string;
@@ -521,9 +534,11 @@ export function DocumentRagApp({
   initialIngestionJobs: DocumentIngestionJob[];
   initialOAuthConnections: OAuthConnectionSummary[];
   initialOAuthConnectionsError: boolean;
+  initialRuleDocuments: RuleDocumentSummary[];
   mcpEndpoint: string;
 }) {
   const [view, setView] = useState<View>('chat');
+  const [documentViewMode, setDocumentViewMode] = useState<DocumentViewMode>('list');
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [oauthConnectionsModalOpen, setOAuthConnectionsModalOpen] = useState(false);
   const [documents, setDocuments] = useState<IndexedDocument[]>(() => initialDocuments);
@@ -549,6 +564,7 @@ export function DocumentRagApp({
   const [repositoryDeleteError, setRepositoryDeleteError] = useState<string | null>(null);
   const [expandedStructureChunkId, setExpandedStructureChunkId] = useState<string | null>(null);
   const [sourcePreview, setSourcePreview] = useState<SourceReference | null>(null);
+  const [externalPreviewDocument, setExternalPreviewDocument] = useState<IndexedDocument | null>(null);
   const [inspectorWidth, setInspectorWidth] = useState(DOCUMENT_INSPECTOR_DEFAULT_WIDTH);
   const [inspectorMaxWidth, setInspectorMaxWidth] = useState(DOCUMENT_INSPECTOR_DEFAULT_WIDTH);
   const [inspectorResizeStart, setInspectorResizeStart] = useState<InspectorResizeStart | null>(null);
@@ -884,6 +900,9 @@ export function DocumentRagApp({
   );
   const sourcePreviewDocument = sourcePreview
     ? documents.find(({ document }) => document.id === sourcePreview.documentId)
+      ?? (externalPreviewDocument?.document.id === sourcePreview.documentId
+        ? externalPreviewDocument
+        : undefined)
     : undefined;
 
   useEffect(() => {
@@ -1043,6 +1062,7 @@ export function DocumentRagApp({
           fileName: file.name,
           mimeType: file.type,
           sizeBytes: file.size,
+          documentKind: 'knowledge',
           stage: 'queued',
           status: 'queued',
           attempts: 1,
@@ -1210,6 +1230,7 @@ export function DocumentRagApp({
       fileName: job.fileName,
       mimeType: job.mimeType,
       sizeBytes: job.sizeBytes,
+      documentKind: job.documentKind,
       status: job.status,
       stage: job.stage,
       attempts: job.attempts,
@@ -1702,12 +1723,69 @@ export function DocumentRagApp({
     event.currentTarget.form?.requestSubmit();
   }
 
-  function openSource(source: SourceReference) {
+  async function loadExternalPreviewDocument(documentId: string) {
+    const response = await fetch(`/api/documents/${encodeURIComponent(documentId)}`, {
+      cache: 'no-store',
+    });
+    const payload = await response.json().catch(() => null) as {
+      document?: IndexedDocument;
+      error?: string;
+    } | null;
+    if (!response.ok || !payload?.document) {
+      throw new Error(payload?.error ?? '근거 문서를 불러오지 못했습니다.');
+    }
+    setExternalPreviewDocument(payload.document);
+    return payload.document;
+  }
+
+  async function openSource(source: SourceReference) {
     sourceModalTriggerRef.current = document.activeElement instanceof HTMLElement
       ? document.activeElement
       : null;
+    if (!documents.some(({ document }) => document.id === source.documentId)) {
+      try {
+        await loadExternalPreviewDocument(source.documentId);
+      } catch (error) {
+        setDocumentActionError({
+          documentId: source.documentId,
+          message: error instanceof Error ? error.message : '근거 문서를 불러오지 못했습니다.',
+        });
+        return;
+      }
+    }
     setExpandedStructureChunkId(source.chunkId);
     setSourcePreview(source);
+  }
+
+  async function openDocumentEvidence(documentId: string, chunkId: string) {
+    const known = documents.find(({ document }) => document.id === documentId)
+      ?? (externalPreviewDocument?.document.id === documentId ? externalPreviewDocument : null)
+      ?? await loadExternalPreviewDocument(documentId);
+    const chunk = known.chunks.find((item) => item.id === chunkId);
+    if (!chunk) throw new Error('문서에서 정확한 근거 청크를 찾지 못했습니다.');
+    await openSource({
+      documentId,
+      versionId: known.document.versionId,
+      documentTitle: known.document.title,
+      chunkId,
+      heading: chunk.headingPath.join(' › ') || '본문',
+      snippet: chunk.text,
+      score: 1,
+      page: chunk.location.page,
+      sheet: chunk.location.sheet,
+      cellRange: chunk.location.cellRange,
+      imageIndex: chunk.location.imageIndex,
+      sourceSpans: chunk.sourceSpans,
+      retrievalRole: known.document.documentKind === 'rule' ? 'rule' : 'expanded',
+    });
+  }
+
+  function openGraphDocument(documentId: string) {
+    const item = documents.find(({ document }) => document.id === documentId);
+    if (!item) return;
+    setSelectedFolderId(item.document.folderId ?? null);
+    setDocumentFilter('');
+    setSelectedDocumentId(documentId);
   }
 
   return (
@@ -1730,6 +1808,10 @@ export function DocumentRagApp({
             <Library size={18} />
             문서 저장소
             <span className="nav-count">{documents.length}</span>
+          </button>
+          <button className={view === 'rules' ? 'active' : ''} type="button" onClick={() => setView('rules')}>
+            <Network size={18} />
+            비즈니스 규칙
           </button>
           <button className={view === 'upload' ? 'active' : ''} type="button" onClick={() => setView('upload')}>
             <HardDriveUpload size={18} />
@@ -1858,8 +1940,11 @@ export function DocumentRagApp({
                     {message.sources?.length ? (
                       <div className="inline-sources">
                         {message.sources.map((source, index) => (
-                          <button key={source.chunkId} type="button" onClick={() => openSource(source)}>
+                          <button key={`${source.retrievalRole ?? 'seed'}:${source.chunkId}`} type="button" onClick={() => void openSource(source)}>
                             <span>{index + 1}</span>
+                            <small className={`retrieval-role-badge ${source.retrievalRole ?? 'seed'}`}>
+                              {retrievalRoleLabel(source.retrievalRole)}
+                            </small>
                             {source.documentTitle}
                             <ChevronRight size={14} />
                           </button>
@@ -1922,6 +2007,22 @@ export function DocumentRagApp({
               <div>
                 <span className="eyebrow">KNOWLEDGE BASE</span>
                 <h1>문서 저장소</h1>
+              </div>
+              <div className="document-view-switch" role="group" aria-label="문서 저장소 보기 방식">
+                <button
+                  className={documentViewMode === 'list' ? 'active' : ''}
+                  type="button"
+                  onClick={() => setDocumentViewMode('list')}
+                >
+                  <List size={16} /> 목록
+                </button>
+                <button
+                  className={documentViewMode === 'graph' ? 'active' : ''}
+                  type="button"
+                  onClick={() => setDocumentViewMode('graph')}
+                >
+                  <Network size={16} /> 그래프
+                </button>
               </div>
             </header>
 
@@ -2185,6 +2286,8 @@ export function DocumentRagApp({
                   </div>
                 ) : null}
 
+                {documentViewMode === 'list' ? (
+                  <>
                 <div className="repository-explorer-toolbar">
                   <div>
                     <strong>항목</strong>
@@ -2366,6 +2469,15 @@ export function DocumentRagApp({
                     </div>
                   ) : null}
                 </div>
+                  </>
+                ) : (
+                  <KnowledgeGraphView
+                    folderId={selectedFolderId}
+                    documentQuery={documentFilter}
+                    onOpenDocument={openGraphDocument}
+                    onOpenEvidence={openDocumentEvidence}
+                  />
+                )}
               </div>
 
               {selectedDocument ? (
@@ -2408,6 +2520,13 @@ export function DocumentRagApp({
               ) : null}
             </div>
           </section>
+        ) : null}
+
+        {view === 'rules' ? (
+          <BusinessRulesView
+            initialRuleDocuments={initialRuleDocuments}
+            onOpenEvidence={openDocumentEvidence}
+          />
         ) : null}
 
         {view === 'upload' ? (
@@ -2926,9 +3045,12 @@ export function DocumentRagApp({
           {activeSources.length ? (
             <div className="source-list">
               {activeSources.map((source, index) => (
-                <button key={source.chunkId} type="button" onClick={() => openSource(source)}>
+                <button key={`${source.retrievalRole ?? 'seed'}:${source.chunkId}`} type="button" onClick={() => void openSource(source)}>
                   <div className="source-number">{index + 1}</div>
                   <div>
+                    <span className={`retrieval-role-badge ${source.retrievalRole ?? 'seed'}`}>
+                      {retrievalRoleLabel(source.retrievalRole)}
+                    </span>
                     <span className="source-score">{Math.round(source.score * 100)}% match</span>
                     <strong>{source.documentTitle}</strong>
                     <small>

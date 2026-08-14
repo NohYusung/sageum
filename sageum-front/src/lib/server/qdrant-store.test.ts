@@ -211,3 +211,40 @@ test('버전 삭제에도 owner_id 필터를 항상 포함한다', async () => {
   assert.equal(deletion.wait, true);
   assert.equal(deletion.ordering, 'strong');
 });
+
+test('경로 검색은 dense 규칙 문맥과 원 질문 BM25를 분리한다', async () => {
+  const fake = fakeClient();
+  const store = new QdrantVectorStore(fake.client, 'document_chunks');
+  await store.query('신진하이텔의 구조', 'owner-id', {
+    documentIds: [CHUNK.documentId],
+    embeddingModel: 'intfloat/multilingual-e5-small',
+    denseQueryText: '신진하이텔의 구조\n연결 규칙: 노유성이 사는 곳은 화곡동이다.',
+    sparseQueryText: '신진하이텔의 구조',
+  });
+
+  const query = fake.queries[0] as {
+    prefetch: Array<{ using: string; query: { text: string } }>;
+  };
+  assert.match(query.prefetch[0].query.text, /연결 규칙/u);
+  assert.equal(query.prefetch[1].query.text, '신진하이텔의 구조');
+});
+
+test('규칙 문서 앵커 검색은 dense cosine만 사용한다', async () => {
+  const fake = fakeClient();
+  const store = new QdrantVectorStore(fake.client, 'document_chunks');
+  await store.query('노유성의 주소', 'owner-id', {
+    documentIds: [CHUNK.documentId],
+    embeddingModel: 'intfloat/multilingual-e5-small',
+    denseOnly: true,
+    scoreThreshold: 0.88,
+  });
+
+  const query = fake.queries[0] as {
+    using?: string;
+    prefetch?: unknown;
+    score_threshold?: number;
+  };
+  assert.equal(query.using, 'dense');
+  assert.equal(query.prefetch, undefined);
+  assert.equal(query.score_threshold, 0.88);
+});

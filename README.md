@@ -28,8 +28,9 @@
 - 규칙 문서 업로드와 자연어 규칙 직접 입력·편집·활성화
 - 주체·대상·관계 유형을 분리하지 않는 규칙 전체 문장 임베딩
 - 규칙 벡터와 일반 문서 청크 벡터의 의미 유사도 기반 자동 바인딩
-- 직접 근거에서 연결 문서까지 한 단계 확장하는 관계 인식 RAG
-- 문서 저장소의 목록·그래프 전환과 규칙 기반 비방향 문서 관계 탐색
+- 직접 근거가 없어도 질문과 유사한 규칙에서 시작하는 관계 인식 RAG
+- 저장된 규칙 간 연결을 한 단계 따라간 뒤 후보 문서 내부를 질문별로 다시 검색
+- 문서 저장소의 목록·그래프 전환과 규칙·문서 실제 연결 경로 탐색
 - Claude Platform on AWS 기반 근거 제한 답변
 - Claude가 반환한 인용 ID를 실제 검색 청크와 다시 대조
 - 근거가 없거나 유효한 인용이 없으면 답변 생성 거부
@@ -60,8 +61,8 @@ flowchart LR
   N -->|"PDF·내장 이미지 OCR/설명"| C
   C -->|"구조화 답변 + chunkId 인용"| N
   N -->|"답변 + 검증된 출처"| U
-  N -->|"규칙·문서 바인딩"| P
-  P -->|"문서 관계 그래프"| N
+  N -->|"규칙·문서 앵커·규칙 연결"| P
+  P -->|"규칙·문서 실제 경로 그래프"| N
   A["외부 MCP 에이전트"] -->|"OAuth 2.1 + Streamable HTTP"| M["/api/mcp"]
   M -->|"OAuth 탐색·사용자 동의"| SA["Supabase Auth"]
   M -->|"owner_id 제한 검색"| Q
@@ -85,7 +86,8 @@ flowchart LR
   - `document_deletion_jobs`: 외부 리소스 삭제 상태와 재시도 정보
   - `rule_documents`: 규칙 문서의 출처, 활성 상태와 추출 처리 상태
   - `knowledge_rules`: 규칙 전체 문장, 원문 근거와 활성 상태
-  - `knowledge_rule_bindings`: 규칙과 의미적으로 유사한 일반 문서 청크 및 유사도 점수
+  - `knowledge_rule_bindings`: 규칙당 문서별 최고 청크 한 개를 보존하는 정적 문서 연결 앵커
+  - `knowledge_rule_links`: 규칙 벡터 유사도로 미리 계산한 방향 없는 규칙 간 연결
   - `mcp_repository_permissions`: 사용자·OAuth 클라이언트별 업로드 허용 여부
   - public 테이블에는 RLS를 적용하고 `owner_id = auth.uid()`를 강제합니다.
 - Qdrant
@@ -141,9 +143,10 @@ flowchart LR
 일반 문서 청크와 의미 유사도 비교
         |
         v
-규칙 ↔ 유사 문서 청크 바인딩
+규칙 ↔ 문서별 최고 앵커 + 규칙 ↔ 규칙 연결
         |
-        +-- 웹 RAG 1단계 확장
+        +-- 질문별 후보 문서 내부 재검색
+        +-- 웹 RAG 규칙 경로 1단계 확장
         +-- MCP 관계 확장 검색
         +-- 문서 관계 그래프
 ```
@@ -152,13 +155,14 @@ flowchart LR
 2. 업로드한 규칙 문서는 기존 파서·OCR·청커를 거친 뒤 Claude가 의미가 완결된 규칙 문장을 추출합니다.
 3. 직접 입력은 입력한 전체 문장을 하나의 규칙으로 사용하며 별도의 주체·대상·관계 유형으로 분리하지 않습니다.
 4. 검증된 규칙 전체를 `knowledge_relations_qdrant_v1`에 dense + BM25 벡터로 색인합니다.
-5. 같은 규칙 벡터로 일반 문서 Collection을 검색하고 유사도 임계값을 넘은 최신 청크를 최대 20개까지 바인딩합니다.
-6. 바인딩은 `knowledge_rule_bindings`에 문서·버전·청크와 점수를 저장하며 오래된 문서 버전은 검색에서 제외합니다.
-7. 규칙 문서와 개별 규칙은 각각 활성화하거나 비활성화할 수 있습니다.
-8. 직접 입력 규칙은 수정할 수 있으며 새 버전 처리에 실패하면 기존 활성 규칙을 유지합니다.
-9. 새 일반 문서가 처리되면 활성 규칙과의 의미 바인딩을 증분 갱신합니다.
-10. 문서 저장소 그래프는 일반 문서만 노드로 표시하고 같은 규칙에 연결된 문서 쌍을 비방향 연결선으로 묶습니다.
-11. 연결선을 선택하면 규칙 문장, 규칙 원문과 양쪽 유사 청크를 확인할 수 있습니다.
+5. 규칙 벡터로 일반 문서 Collection을 dense cosine 검색하고 E5 점수를 보정한 뒤, 문서별 최고 점수 청크 한 개를 연결 앵커로 선택합니다. 규칙당 최대 20개 문서를 연결합니다.
+6. 관계 Collection에서 같은 사용자의 다른 규칙을 dense cosine으로 검색합니다. `multilingual-e5`의 높은 공통 cosine 기준선을 제거해 0~1로 보정한 뒤 임계값을 넘은 상위 5개를 `knowledge_rule_links`에 canonical 비방향 쌍으로 저장합니다.
+7. `knowledge_rule_bindings`의 청크는 연결된 문서를 선택하고 연결 이유를 표시하는 앵커이며, 최종 답변 근거로 그대로 사용하지 않습니다.
+8. 규칙 문서와 개별 규칙은 각각 활성화하거나 비활성화할 수 있습니다.
+9. 직접 입력 규칙은 수정할 수 있으며 새 버전 처리에 실패하면 기존 활성 규칙·앵커·규칙 연결을 유지합니다.
+10. 새 일반 문서가 처리되면 활성 규칙과의 문서 앵커를 증분 갱신합니다.
+11. 문서 저장소 그래프는 규칙과 일반 문서를 별도 노드로 표시하고 `규칙 ↔ 규칙`, `규칙 ↔ 문서` 실제 연결선만 표시합니다.
+12. 규칙 노드와 연결선을 선택하면 규칙 원문, 연결 규칙, 문서 앵커 청크와 유사도 점수를 확인할 수 있습니다.
 
 ### 폴더 관리
 
@@ -173,16 +177,17 @@ flowchart LR
 ### 질문과 답변
 
 1. 로그인 사용자의 질문을 Qdrant에 전달합니다.
-2. 문서 Collection이 `owner_id`를 강제한 dense + BM25 하이브리드 검색으로 직접 근거를 찾습니다.
-3. 관계 Collection은 질문과 유사한 활성 규칙을 찾고 Supabase에서 최신 의미 바인딩을 검증합니다.
-4. 직접 근거 문서에 연결된 규칙만 적용하고, 같은 규칙에 연결된 다른 문서의 청크를 한 단계 확장 근거로 가져옵니다.
-5. 폴더·문서 범위 질문은 직접 근거와 확장 근거 모두 동일한 범위를 벗어나지 않습니다.
-6. 최대 활성 규칙 2개, 직접 근거 4개, 확장 근거 4개를 사용하며 관계 Collection 장애 시 일반 문서 검색만 유지합니다.
-7. Claude에는 `직접 근거(seed)`, `관계 규칙(rule)`, `확장 근거(expanded)`를 구분해 전달합니다.
-8. 규칙만으로 세부 사실을 생성하지 않으며 직접 근거와 다른 문서의 확장 근거가 함께 있을 때만 관계를 적용합니다.
-9. Claude가 검색 근거만 사용해 한국어 답변과 인용 청크 ID를 생성합니다.
-10. 서버가 인용 ID를 검색 결과와 대조하고 유효한 출처만 반환합니다.
-11. Claude 설정이 없거나 호출이 실패하면 검색 원문 기반 답변으로 fallback합니다.
+2. 일반 문서 직접 검색과 질문에 유사한 시작 규칙 검색을 처음부터 병렬 실행합니다.
+3. 직접 문서 근거가 없어도 시작 규칙을 최대 2개 선택하고, 저장된 `knowledge_rule_links`를 최대 한 단계 따라갑니다.
+4. 시작 규칙과 연결 규칙의 정적 앵커는 후보 문서 ID만 결정합니다. 앵커 청크 본문은 최종 답변 근거로 사용하지 않습니다.
+5. 규칙 경로를 최대 2개 선택하고 경로별 후보 문서 안에서 Qdrant 검색을 병렬 실행합니다.
+6. 경로 검색의 dense 질의에는 원 질문과 경로 규칙 문장을 함께 넣고, BM25 질의에는 `구조` 같은 실제 검색어를 보존하기 위해 원 질문만 넣습니다.
+7. 관계 경로가 성공하면 RRF의 한쪽 검색에서만 나온 `0.5` 이하 직접 결과 중 경로 밖 문서는 잡음으로 제외합니다. 같은 청크가 직접 근거와 확장 근거에 모두 나오면 직접 근거 하나만 유지하며 확장 근거는 전체 최대 4개만 반환합니다.
+8. 폴더·문서 범위 질문은 규칙의 후보 문서 선택과 경로별 재검색 모두 같은 범위를 벗어나지 않습니다.
+9. Claude에는 `직접 근거(seed)`, `관계 규칙(rule)`, `확장 근거(expanded)`를 구분해 전달합니다.
+10. 규칙만 있고 질문별 동적 문서 근거가 없으면 규칙을 Claude에 전달하지 않습니다.
+11. 일부 경로 검색이 실패하면 성공한 경로와 일반 검색을 유지하며, 모든 관계 검색이 실패한 경우만 `relationMode: fallback`을 반환합니다.
+12. Claude가 검색 근거만 사용해 한국어 답변과 인용 청크 ID를 생성하고 서버가 유효한 출처만 반환합니다.
 
 ### 외부 에이전트 MCP
 
@@ -191,7 +196,7 @@ flowchart LR
 3. 외부 에이전트는 브라우저에서 Sageum 로그인과 사용자 동의를 완료하고 Access Token을 발급받습니다.
 4. 서버는 JWT 서명·발급자·만료·`client_id`를 검증하고 `sub`를 문서 `owner_id`로 사용합니다.
 5. DB 조회는 OAuth Access Token과 RLS를 사용하며 Qdrant에도 검증된 `owner_id` 필터를 강제합니다.
-6. `search_repository`는 웹 챗봇과 같은 관계 확장 검색을 사용하고 `relationMode`, `appliedRules`와 `seed | rule | expanded` 근거 역할을 반환합니다.
+6. `search_repository`는 웹 챗봇과 같은 규칙 경로별 동적 검색을 사용하고 `relationMode`, 경로·깊이가 포함된 `appliedRules`와 `seed | rule | expanded` 근거 역할을 반환합니다.
 7. `list_folders`, `list_documents`, `get_document`, `get_chunk`, `get_original_link`를 읽기 전용으로 제공합니다.
 8. `get_ingestion_status`로 업로드·파싱·OCR·색인 상태와 실패 사유를 조회합니다.
 9. 사용자가 클라이언트별 업로드 권한을 켜면 `create_upload`가 2시간 signed URL을 발급하고, 원본 PUT 후 `complete_upload`가 Workflow를 시작합니다.
@@ -267,6 +272,7 @@ QDRANT_INFERENCE_DIMENSIONS=384
 QDRANT_SCORE_THRESHOLD=0.2
 QDRANT_RELATION_SCORE_THRESHOLD=0.35
 QDRANT_RULE_BINDING_SCORE_THRESHOLD=0.2
+QDRANT_RULE_RULE_SCORE_THRESHOLD=0.35
 
 # Claude Platform on AWS — Amazon Bedrock와 다른 서비스입니다.
 ANTHROPIC_AWS_WORKSPACE_ID=wrkspc_example
@@ -313,6 +319,7 @@ npm run dev
 - MCP 업로드 권한과 OAuth 직접 쓰기 차단은 `docs/mcp-write-permissions-schema.sql`, `docs/mcp-oauth-write-boundary-schema.sql`에 기록되어 있습니다.
 - 비즈니스 규칙·의미 바인딩·그래프 스키마는 `docs/knowledge-relations-schema.sql`을 적용합니다.
 - 기존 주체·대상 기반 관계 스키마를 사용했다면 `docs/semantic-rule-bindings-migration.sql`로 규칙 전체 벡터 방식으로 전환합니다.
+- 기존 의미 바인딩 구조는 `docs/rule-path-dynamic-search-migration.sql`로 문서별 단일 앵커와 규칙 간 연결 구조로 전환합니다.
 - Storage와 데이터베이스의 사용자 소유권은 모두 로그인한 `auth.uid()`를 기준으로 제한합니다.
 
 ### Qdrant
@@ -332,7 +339,7 @@ npm run qdrant:reindex
 npm run qdrant:relations:reindex
 ```
 
-- `qdrant:relations:reindex`는 활성 규칙 전체를 다시 색인하고 현재 일반 문서 청크와의 의미 바인딩을 재생성합니다.
+- `qdrant:relations:reindex`는 규칙 벡터, 문서별 최고 앵커와 규칙 간 상위 연결을 모두 재생성합니다.
 
 ### Claude Platform on AWS
 
@@ -410,7 +417,7 @@ npm run mcp:smoke -- "환경 변수 명세는 무엇인가?"
 - PDF 전체와 이미지 OCR은 Claude Vision 입력 토큰을 사용합니다.
 - 각 질문은 독립적으로 검색합니다. 대화 이력을 이용한 후속 질문 재작성은 아직 없습니다.
 - 답변은 스트리밍하지 않고 완성된 구조화 결과를 한 번에 반환합니다.
-- 관계 확장 검색은 질문당 활성 규칙 최대 2개, 확장 근거 최대 4개, 한 단계까지만 탐색합니다.
+- 관계 확장 검색은 질문당 시작 규칙 최대 2개, 규칙 경로 최대 2개, 확장 근거 최대 4개이며 규칙 연결은 한 단계까지만 탐색합니다.
 - 규칙은 의미가 유사한 문서를 연결하는 검색 힌트이며, 규칙 자체만으로 문서에 없는 세부 사실을 답변하지 않습니다.
 - RAG 정답 세트와 자동 품질 평가는 아직 추가되지 않았습니다.
 - 앱은 Supabase Free 플랜의 Storage 상한에 맞춰 파일당 최대 50MB를 허용합니다.

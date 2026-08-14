@@ -64,3 +64,46 @@ test('규칙 수정 스테이징은 문서 전체를 지우지 않고 새 포인
   assert.match(JSON.stringify(deletion?.payload), /old-rule-id/);
   assert.doesNotMatch(JSON.stringify(deletion?.payload), /rule_document_id/);
 });
+
+test('규칙 유사도 검색은 교체 대상과 자기 규칙을 Qdrant 필터에서 제외한다', async () => {
+  const mocked = mockClient();
+  const store = new QdrantRelationVectorStore(mocked.client as never, 'relations');
+  await store.query(
+    '노유성이 사는 곳은 신진하이텔이다.',
+    'owner-id',
+    'intfloat/multilingual-e5-small',
+    5,
+    ['new-rule-id', 'old-rule-id', 'old-rule-id'],
+  );
+
+  const query = mocked.calls.find((call) => call.method === 'query');
+  const serialized = JSON.stringify(query?.payload);
+  assert.match(serialized, /must_not/);
+  assert.match(serialized, /new-rule-id/);
+  assert.match(serialized, /old-rule-id/);
+});
+
+test('규칙 간 저장 연결은 RRF가 아닌 dense cosine 점수와 임계값을 사용한다', async () => {
+  const mocked = mockClient();
+  const store = new QdrantRelationVectorStore(mocked.client as never, 'relations');
+  await store.querySimilarRules(
+    '노유성이 사는 곳은 신진하이텔이다.',
+    'owner-id',
+    'intfloat/multilingual-e5-small',
+    5,
+    0.35,
+    ['self-rule-id'],
+  );
+
+  const query = mocked.calls.find((call) => call.method === 'query');
+  const payload = query?.payload as {
+    using?: string;
+    query?: { fusion?: string };
+    score_threshold?: number;
+    prefetch?: unknown;
+  };
+  assert.equal(payload.using, 'dense');
+  assert.equal(payload.score_threshold, 0.35);
+  assert.equal(payload.query?.fusion, undefined);
+  assert.equal(payload.prefetch, undefined);
+});

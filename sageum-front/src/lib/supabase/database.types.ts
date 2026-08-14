@@ -282,6 +282,51 @@ export type Database = {
           },
         ];
       };
+      knowledge_rule_links: {
+        Row: {
+          created_at: string;
+          id: string;
+          left_rule_id: string;
+          owner_id: string;
+          right_rule_id: string;
+          updated_at: string;
+          vector_score: number;
+        };
+        Insert: {
+          created_at?: string;
+          id?: string;
+          left_rule_id: string;
+          owner_id: string;
+          right_rule_id: string;
+          updated_at?: string;
+          vector_score: number;
+        };
+        Update: {
+          created_at?: string;
+          id?: string;
+          left_rule_id?: string;
+          owner_id?: string;
+          right_rule_id?: string;
+          updated_at?: string;
+          vector_score?: number;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'knowledge_rule_links_left_rule_owner_fkey';
+            columns: ['left_rule_id', 'owner_id'];
+            isOneToOne: false;
+            referencedRelation: 'knowledge_rules';
+            referencedColumns: ['id', 'owner_id'];
+          },
+          {
+            foreignKeyName: 'knowledge_rule_links_right_rule_owner_fkey';
+            columns: ['right_rule_id', 'owner_id'];
+            isOneToOne: false;
+            referencedRelation: 'knowledge_rules';
+            referencedColumns: ['id', 'owner_id'];
+          },
+        ];
+      };
       knowledge_rules: {
         Row: {
           confidence: number;
@@ -657,6 +702,7 @@ export type Database = {
       replace_knowledge_rule_extraction: {
         Args: {
           p_bindings: Json;
+          p_links: Json;
           p_owner_id: string;
           p_rule_document_id: string;
           p_rule_version_id: string;
@@ -667,6 +713,14 @@ export type Database = {
           p_preserve_rule_enabled?: boolean;
           p_source_mode?: string;
           p_warning?: string | null;
+        };
+        Returns: undefined;
+      };
+      replace_owner_knowledge_rule_graph: {
+        Args: {
+          p_bindings: Json;
+          p_links: Json;
+          p_owner_id: string;
         };
         Returns: undefined;
       };

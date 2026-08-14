@@ -25,9 +25,17 @@ export type PersistableKnowledgeRuleBinding = {
   vector_score: number;
 };
 
+export type PersistableKnowledgeRuleLink = {
+  id: string;
+  left_rule_id: string;
+  right_rule_id: string;
+  vector_score: number;
+};
+
 export type RuleProcessingResult = {
   ruleCount: number;
   bindingCount: number;
+  linkCount: number;
   warning: string | null;
 };
 
@@ -40,12 +48,47 @@ export class BusinessRuleProcessingError extends Error {
 
 const MAX_BINDINGS_PER_RULE = 20;
 const BINDING_CANDIDATE_LIMIT = 40;
+const MAX_LINKS_PER_RULE = 5;
+const RULE_LINK_CANDIDATE_LIMIT = 12;
 
 function bindingScoreThreshold() {
   const value = Number.parseFloat(
     process.env.QDRANT_RULE_BINDING_SCORE_THRESHOLD?.trim() ?? '0.2',
   );
   return Number.isFinite(value) && value >= 0 ? value : 0.2;
+}
+
+function ruleLinkScoreThreshold() {
+  const value = Number.parseFloat(
+    process.env.QDRANT_RULE_RULE_SCORE_THRESHOLD?.trim() ?? '0.35',
+  );
+  return Number.isFinite(value) && value >= 0 ? value : 0.35;
+}
+
+const MULTILINGUAL_E5_COSINE_BASELINE = 0.85;
+
+export function calibratedRuleLinkScore(rawScore: number, embeddingModel: string) {
+  if (!embeddingModel.toLowerCase().includes('multilingual-e5')) {
+    return Math.min(1, Math.max(0, rawScore));
+  }
+  return Math.min(1, Math.max(
+    0,
+    (rawScore - MULTILINGUAL_E5_COSINE_BASELINE) / (1 - MULTILINGUAL_E5_COSINE_BASELINE),
+  ));
+}
+
+function rawSemanticScoreThreshold(embeddingModel: string, configured: number) {
+  return embeddingModel.toLowerCase().includes('multilingual-e5')
+    ? MULTILINGUAL_E5_COSINE_BASELINE
+      + (1 - MULTILINGUAL_E5_COSINE_BASELINE) * configured
+    : configured;
+}
+
+export function canonicalRulePair(firstRuleId: string, secondRuleId: string) {
+  if (!firstRuleId || !secondRuleId || firstRuleId === secondRuleId) return null;
+  return firstRuleId < secondRuleId
+    ? [firstRuleId, secondRuleId] as const
+    : [secondRuleId, firstRuleId] as const;
 }
 
 function activeKnowledgeVersionMap(
@@ -61,14 +104,14 @@ export function semanticBindingsFromCandidates(
   candidates: VectorSearchResult[],
   latestVersions: Map<string, string>,
 ) {
-  const seenChunks = new Set<string>();
+  const seenDocuments = new Set<string>();
   const bindings: PersistableKnowledgeRuleBinding[] = [];
   for (const candidate of candidates) {
     if (bindings.length >= MAX_BINDINGS_PER_RULE) break;
-    if (seenChunks.has(candidate.chunkId)) continue;
+    if (seenDocuments.has(candidate.documentId)) continue;
     if (latestVersions.get(candidate.documentId) !== candidate.versionId) continue;
     if (!candidate.text.trim()) continue;
-    seenChunks.add(candidate.chunkId);
+    seenDocuments.add(candidate.documentId);
     bindings.push({
       id: randomUUID(),
       rule_id: rule.id,
@@ -111,9 +154,20 @@ async function queryBindingsForRule(
     embeddingModel: configuration.embedding.model,
     documentIds: [...latestVersions.keys()],
     limit: BINDING_CANDIDATE_LIMIT,
-    scoreThreshold: bindingScoreThreshold(),
+    scoreThreshold: rawSemanticScoreThreshold(
+      configuration.embedding.model,
+      bindingScoreThreshold(),
+    ),
+    denseOnly: true,
   });
-  return semanticBindingsFromCandidates(rule, candidates, latestVersions);
+  return semanticBindingsFromCandidates(
+    rule,
+    candidates.map((candidate) => ({
+      ...candidate,
+      score: calibratedRuleLinkScore(candidate.score, configuration.embedding.model),
+    })),
+    latestVersions,
+  );
 }
 
 async function buildBindings(
@@ -128,6 +182,70 @@ async function buildBindings(
     bindings.push(...await queryBindingsForRule(ownerId, rule, latestVersions));
   }
   return bindings;
+}
+
+async function availableRuleIds(
+  supabase: AdminClient,
+  ownerId: string,
+  excludedRuleIds: string[],
+) {
+  const { data, error } = await supabase
+    .from('knowledge_rules')
+    .select('id')
+    .eq('owner_id', ownerId);
+  if (error) throw new Error('규칙 연결 후보를 조회하지 못했습니다.');
+  const excluded = new Set(excludedRuleIds);
+  return new Set(data.map((rule) => rule.id).filter((ruleId) => !excluded.has(ruleId)));
+}
+
+async function buildRuleLinks(
+  supabase: AdminClient,
+  ownerId: string,
+  rules: ValidatedExtractedRule[],
+  replacedRuleIds: string[] = [],
+) {
+  const configuration = getProviderConfiguration();
+  const relationStore = getQdrantRelationVectorStore();
+  const allowedRuleIds = await availableRuleIds(supabase, ownerId, replacedRuleIds);
+  rules.forEach((rule) => allowedRuleIds.add(rule.id));
+  const pairScores = new Map<string, PersistableKnowledgeRuleLink>();
+
+  for (const rule of rules) {
+    const hits = await relationStore.querySimilarRules(
+      rule.statement,
+      ownerId,
+      configuration.embedding.model,
+      RULE_LINK_CANDIDATE_LIMIT,
+      rawSemanticScoreThreshold(
+        configuration.embedding.model,
+        ruleLinkScoreThreshold(),
+      ),
+      [rule.id, ...replacedRuleIds],
+    );
+    let accepted = 0;
+    for (const hit of hits) {
+      if (accepted >= MAX_LINKS_PER_RULE) break;
+      const calibratedScore = calibratedRuleLinkScore(
+        hit.score,
+        configuration.embedding.model,
+      );
+      if (calibratedScore < ruleLinkScoreThreshold() || !allowedRuleIds.has(hit.id)) continue;
+      const pair = canonicalRulePair(rule.id, hit.id);
+      if (!pair) continue;
+      const key = pair.join(':');
+      const current = pairScores.get(key);
+      if (!current || calibratedScore > current.vector_score) {
+        pairScores.set(key, {
+          id: current?.id ?? randomUUID(),
+          left_rule_id: pair[0],
+          right_rule_id: pair[1],
+          vector_score: calibratedScore,
+        });
+      }
+      accepted += 1;
+    }
+  }
+  return [...pairScores.values()];
 }
 
 function persistableRule(rule: ValidatedExtractedRule, enabled = true) {
@@ -179,12 +297,50 @@ function manualRule(
   };
 }
 
-function processingWarning(rejectedReasons: string[], bindings: PersistableKnowledgeRuleBinding[]) {
+async function processingWarning(
+  supabase: AdminClient,
+  ownerId: string,
+  rejectedReasons: string[],
+  rules: ValidatedExtractedRule[],
+  bindings: PersistableKnowledgeRuleBinding[],
+  links: PersistableKnowledgeRuleLink[],
+) {
   const messages: string[] = [];
   if (rejectedReasons.length) messages.push(`${rejectedReasons.length}개 규칙 후보 제외`);
-  const boundDocuments = new Set(bindings.map((binding) => binding.document_id));
-  if (boundDocuments.size < 2) {
-    messages.push('현재 일반 문서에서 이 규칙과 유사한 문서를 2개 이상 찾지 못함');
+  const newRuleIds = new Set(rules.map((rule) => rule.id));
+  const directlyBoundRuleIds = new Set(bindings.map((binding) => binding.rule_id));
+  const linkedExistingRuleIds = [...new Set(links.flatMap((link) => (
+    newRuleIds.has(link.left_rule_id) && !newRuleIds.has(link.right_rule_id)
+      ? [link.right_rule_id]
+      : newRuleIds.has(link.right_rule_id) && !newRuleIds.has(link.left_rule_id)
+        ? [link.left_rule_id]
+        : []
+  )))];
+  let linkedBoundRuleIds = new Set<string>();
+  if (linkedExistingRuleIds.length) {
+    const { data, error } = await supabase
+      .from('knowledge_rule_bindings')
+      .select('rule_id')
+      .eq('owner_id', ownerId)
+      .in('rule_id', linkedExistingRuleIds);
+    if (error) throw new Error('연결 규칙의 문서 경로를 확인하지 못했습니다.');
+    linkedBoundRuleIds = new Set(data.map((binding) => binding.rule_id));
+  }
+  const hasUsablePath = rules.some((rule) => {
+    if (directlyBoundRuleIds.has(rule.id)) return true;
+    return links.some((link) => {
+      const linkedRuleId = link.left_rule_id === rule.id
+        ? link.right_rule_id
+        : link.right_rule_id === rule.id
+          ? link.left_rule_id
+          : null;
+      return linkedRuleId !== null && (
+        directlyBoundRuleIds.has(linkedRuleId) || linkedBoundRuleIds.has(linkedRuleId)
+      );
+    });
+  });
+  if (!hasUsablePath) {
+    messages.push('현재 활용 가능한 규칙·문서 연결 경로가 없습니다');
   }
   return messages.length ? messages.join(' · ') : null;
 }
@@ -253,7 +409,6 @@ export async function processBusinessRuleDocument(
       throw new BusinessRuleProcessingError('규칙 문서에서 유효한 규칙을 추출하지 못했습니다.');
     }
     const bindings = await buildBindings(supabase, ownerId, extracted.rules);
-    const warning = processingWarning(extracted.rejectedReasons, bindings);
     const preservedEnabled = preserveExisting && existingRules.length === 1
       ? existingRules[0].enabled
       : true;
@@ -270,6 +425,20 @@ export async function processBusinessRuleDocument(
     }));
     stagedRuleIds = vectorRecords.map((record) => record.id);
     await relationStore.upsertRecords(vectorRecords);
+    const links = await buildRuleLinks(
+      supabase,
+      ownerId,
+      extracted.rules,
+      existingRules.map((rule) => rule.id),
+    );
+    const warning = await processingWarning(
+      supabase,
+      ownerId,
+      extracted.rejectedReasons,
+      extracted.rules,
+      bindings,
+      links,
+    );
 
     const { error } = await supabase.rpc('replace_knowledge_rule_extraction', {
       p_owner_id: ownerId,
@@ -277,6 +446,7 @@ export async function processBusinessRuleDocument(
       p_rule_version_id: versionId,
       p_rules: extracted.rules.map((rule) => persistableRule(rule, preservedEnabled)) as unknown as Json,
       p_bindings: bindings as unknown as Json,
+      p_links: links as unknown as Json,
       p_warning: warning,
       p_source_mode: sourceMode,
       p_manual_content: sourceMode === 'manual' ? options.manualContent ?? null : null,
@@ -291,7 +461,12 @@ export async function processBusinessRuleDocument(
       console.error('Failed to clean replaced relation vectors', cleanupError);
     }
     stagedRuleIds = [];
-    return { ruleCount: extracted.rules.length, bindingCount: bindings.length, warning };
+    return {
+      ruleCount: extracted.rules.length,
+      bindingCount: bindings.length,
+      linkCount: links.length,
+      warning,
+    };
   } catch (error) {
     try {
       await relationStore.deleteByRuleIds(ownerId, stagedRuleIds);
@@ -369,6 +544,7 @@ export async function rebuildAllSemanticRuleBindings(supabase: AdminClient) {
   const relationStore = getQdrantRelationVectorStore();
   await relationStore.ensureCollection(configuration.embedding.dimensions);
   let bindingCount = 0;
+  let linkCount = 0;
   for (const [ownerId, ownerRules] of rulesByOwner) {
     const shapedRules = ownerRules.map((rule): ValidatedExtractedRule => ({
       id: rule.id,
@@ -382,20 +558,6 @@ export async function rebuildAllSemanticRuleBindings(supabase: AdminClient) {
       extractionModel: configuration.embedding.model,
       extractionVersion: RULE_EXTRACTION_VERSION,
     }));
-    const bindings = await buildBindings(supabase, ownerId, shapedRules);
-    const { error: deleteError } = await supabase
-      .from('knowledge_rule_bindings')
-      .delete()
-      .eq('owner_id', ownerId);
-    if (deleteError) throw new Error('기존 의미 바인딩을 정리하지 못했습니다.');
-    if (bindings.length) {
-      const rows: TablesInsert<'knowledge_rule_bindings'>[] = bindings.map((binding) => ({
-        ...binding,
-        owner_id: ownerId,
-      }));
-      const { error: insertError } = await supabase.from('knowledge_rule_bindings').insert(rows);
-      if (insertError) throw new Error('새 의미 바인딩을 저장하지 못했습니다.');
-    }
     await relationStore.upsertRecords(ownerRules.map((rule) => ({
       id: rule.id,
       ownerId,
@@ -405,7 +567,21 @@ export async function rebuildAllSemanticRuleBindings(supabase: AdminClient) {
       statement: rule.statement,
       embeddingModel: configuration.embedding.model,
     })));
+    const bindings = await buildBindings(supabase, ownerId, shapedRules);
+    const links = await buildRuleLinks(supabase, ownerId, shapedRules);
+    const { error: replaceError } = await supabase.rpc('replace_owner_knowledge_rule_graph', {
+      p_owner_id: ownerId,
+      p_bindings: bindings as unknown as Json,
+      p_links: links as unknown as Json,
+    });
+    if (replaceError) throw new Error('규칙의 문서 앵커와 규칙 연결을 교체하지 못했습니다.');
     bindingCount += bindings.length;
+    linkCount += links.length;
   }
-  return { ownerCount: rulesByOwner.size, ruleCount: storedRules.length, bindingCount };
+  return {
+    ownerCount: rulesByOwner.size,
+    ruleCount: storedRules.length,
+    bindingCount,
+    linkCount,
+  };
 }

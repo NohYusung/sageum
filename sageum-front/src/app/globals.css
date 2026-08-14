@@ -3936,6 +3936,29 @@ body.resizing-document-inspector * {
   white-space: nowrap;
 }
 
+.knowledge-rule-links {
+  display: grid;
+  gap: 6px;
+  margin-top: 4px;
+  padding: 10px;
+  border: 1px solid #eadbb6;
+  border-radius: 9px;
+  background: #fffaf0;
+}
+
+.knowledge-rule-links > strong {
+  color: var(--amber);
+  font-size: 11px;
+}
+
+.knowledge-rule-links > button {
+  justify-content: flex-start;
+  border: 0;
+  background: transparent;
+  color: #7f5a25;
+  text-align: left;
+}
+
 .rule-binding-count {
   padding: 5px 8px;
   border-radius: 999px;
@@ -4168,9 +4191,24 @@ body.resizing-document-inspector * {
   box-shadow: 0 0 0 3px rgb(73 107 91 / 15%);
 }
 
+.react-flow__node.knowledge-graph-rule-node {
+  border-color: #ddc68e;
+  background: #fff9e9;
+}
+
+.react-flow__node.knowledge-graph-rule-node.selected {
+  border-color: var(--amber);
+  box-shadow: 0 0 0 3px rgb(183 118 29 / 14%);
+}
+
 .react-flow__edge-path {
   stroke: var(--sage);
   stroke-width: 1.5;
+}
+
+.knowledge-graph-rule-rule-edge .react-flow__edge-path {
+  stroke: var(--amber);
+  stroke-dasharray: 5 3;
 }
 
 .react-flow__edge-text {
@@ -4199,6 +4237,10 @@ body.resizing-document-inspector * {
 
 .knowledge-graph-node small {
   color: var(--muted);
+}
+
+.knowledge-graph-node.rule {
+  color: #8a5c1d;
 }
 
 .knowledge-graph-details {

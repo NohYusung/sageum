@@ -177,7 +177,7 @@ create table if not exists public.knowledge_rule_bindings (
     on delete cascade,
   constraint knowledge_rule_bindings_chunk_text_check check (char_length(chunk_text) between 1 and 20000),
   constraint knowledge_rule_bindings_score_check check (vector_score between 0 and 1),
-  constraint knowledge_rule_bindings_rule_chunk_unique unique (rule_id, chunk_id)
+  constraint knowledge_rule_bindings_rule_document_unique unique (rule_id, document_id)
 );
 
 create index if not exists knowledge_rule_bindings_rule_score_idx
@@ -191,9 +191,42 @@ create index if not exists knowledge_rule_bindings_owner_document_idx
 create index if not exists knowledge_rule_bindings_chunk_idx
   on public.knowledge_rule_bindings (chunk_id);
 
+create table if not exists public.knowledge_rule_links (
+  id uuid primary key default gen_random_uuid(),
+  owner_id uuid not null,
+  left_rule_id uuid not null,
+  right_rule_id uuid not null,
+  vector_score double precision not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint knowledge_rule_links_left_rule_owner_fkey
+    foreign key (left_rule_id, owner_id)
+    references public.knowledge_rules (id, owner_id)
+    on delete cascade,
+  constraint knowledge_rule_links_right_rule_owner_fkey
+    foreign key (right_rule_id, owner_id)
+    references public.knowledge_rules (id, owner_id)
+    on delete cascade,
+  constraint knowledge_rule_links_canonical_pair_check
+    check (left_rule_id::text < right_rule_id::text),
+  constraint knowledge_rule_links_score_check check (vector_score between 0 and 1),
+  constraint knowledge_rule_links_owner_pair_unique
+    unique (owner_id, left_rule_id, right_rule_id)
+);
+
+create index if not exists knowledge_rule_links_owner_left_idx
+  on public.knowledge_rule_links (owner_id, left_rule_id, vector_score desc);
+create index if not exists knowledge_rule_links_owner_right_idx
+  on public.knowledge_rule_links (owner_id, right_rule_id, vector_score desc);
+create index if not exists knowledge_rule_links_left_rule_owner_fkey_idx
+  on public.knowledge_rule_links (left_rule_id, owner_id);
+create index if not exists knowledge_rule_links_right_rule_owner_fkey_idx
+  on public.knowledge_rule_links (right_rule_id, owner_id);
+
 alter table public.rule_documents enable row level security;
 alter table public.knowledge_rules enable row level security;
 alter table public.knowledge_rule_bindings enable row level security;
+alter table public.knowledge_rule_links enable row level security;
 
 drop policy if exists rule_documents_select_own on public.rule_documents;
 create policy rule_documents_select_own
@@ -210,18 +243,30 @@ create policy knowledge_rule_bindings_select_own
   on public.knowledge_rule_bindings for select to authenticated
   using ((select auth.uid()) = owner_id);
 
+drop policy if exists knowledge_rule_links_select_own on public.knowledge_rule_links;
+create policy knowledge_rule_links_select_own
+  on public.knowledge_rule_links for select to authenticated
+  using ((select auth.uid()) = owner_id);
+
 revoke all on public.rule_documents from anon, authenticated;
 revoke all on public.knowledge_rules from anon, authenticated;
 revoke all on public.knowledge_rule_bindings from anon, authenticated;
+revoke all on public.knowledge_rule_links from anon, authenticated;
 grant select on public.rule_documents to authenticated;
 grant select on public.knowledge_rules to authenticated;
 grant select on public.knowledge_rule_bindings to authenticated;
+grant select on public.knowledge_rule_links to authenticated;
 grant select, insert, update, delete on public.rule_documents to service_role;
 grant select, insert, update, delete on public.knowledge_rules to service_role;
 grant select, insert, update, delete on public.knowledge_rule_bindings to service_role;
+grant select, insert, update, delete on public.knowledge_rule_links to service_role;
 
 drop function if exists public.replace_knowledge_rule_extraction(
   uuid, uuid, uuid, jsonb, jsonb, text
+);
+
+drop function if exists public.replace_knowledge_rule_extraction(
+  uuid, uuid, uuid, jsonb, jsonb, text, text, text, text, text, boolean
 );
 
 create or replace function public.replace_knowledge_rule_extraction(
@@ -230,6 +275,7 @@ create or replace function public.replace_knowledge_rule_extraction(
   p_rule_version_id uuid,
   p_rules jsonb,
   p_bindings jsonb,
+  p_links jsonb,
   p_warning text default null,
   p_source_mode text default 'upload',
   p_manual_content text default null,
@@ -243,8 +289,11 @@ security invoker
 set search_path = ''
 as $$
 begin
-  if jsonb_typeof(p_rules) <> 'array' or jsonb_typeof(p_bindings) <> 'array' then
-    raise exception 'rules and bindings must be arrays' using errcode = '22023';
+  if jsonb_typeof(p_rules) <> 'array'
+    or jsonb_typeof(p_bindings) <> 'array'
+    or jsonb_typeof(p_links) <> 'array'
+  then
+    raise exception 'rules, bindings, and links must be arrays' using errcode = '22023';
   end if;
   if p_source_mode not in ('upload', 'manual') then
     raise exception 'invalid rule source mode' using errcode = '22023';
@@ -343,6 +392,18 @@ begin
     vector_score double precision
   );
 
+  insert into public.knowledge_rule_links (
+    id, owner_id, left_rule_id, right_rule_id, vector_score
+  )
+  select
+    link.id, p_owner_id, link.left_rule_id, link.right_rule_id, link.vector_score
+  from jsonb_to_recordset(p_links) as link(
+    id uuid,
+    left_rule_id uuid,
+    right_rule_id uuid,
+    vector_score double precision
+  );
+
   update public.rule_documents
   set extraction_status = 'ready',
       extraction_error = null,
@@ -355,8 +416,61 @@ end;
 $$;
 
 revoke all on function public.replace_knowledge_rule_extraction(
-  uuid, uuid, uuid, jsonb, jsonb, text, text, text, text, text, boolean
+  uuid, uuid, uuid, jsonb, jsonb, jsonb, text, text, text, text, text, boolean
 ) from public, anon, authenticated;
 grant execute on function public.replace_knowledge_rule_extraction(
-  uuid, uuid, uuid, jsonb, jsonb, text, text, text, text, text, boolean
+  uuid, uuid, uuid, jsonb, jsonb, jsonb, text, text, text, text, text, boolean
 ) to service_role;
+
+create or replace function public.replace_owner_knowledge_rule_graph(
+  p_owner_id uuid,
+  p_bindings jsonb,
+  p_links jsonb
+)
+returns void
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+begin
+  if jsonb_typeof(p_bindings) <> 'array' or jsonb_typeof(p_links) <> 'array' then
+    raise exception 'bindings and links must be arrays' using errcode = '22023';
+  end if;
+
+  delete from public.knowledge_rule_links where owner_id = p_owner_id;
+  delete from public.knowledge_rule_bindings where owner_id = p_owner_id;
+
+  insert into public.knowledge_rule_bindings (
+    id, rule_id, owner_id, document_id, version_id, chunk_id, chunk_text, vector_score
+  )
+  select
+    binding.id, binding.rule_id, p_owner_id, binding.document_id,
+    binding.version_id, binding.chunk_id, binding.chunk_text, binding.vector_score
+  from jsonb_to_recordset(p_bindings) as binding(
+    id uuid,
+    rule_id uuid,
+    document_id uuid,
+    version_id uuid,
+    chunk_id text,
+    chunk_text text,
+    vector_score double precision
+  );
+
+  insert into public.knowledge_rule_links (
+    id, owner_id, left_rule_id, right_rule_id, vector_score
+  )
+  select
+    link.id, p_owner_id, link.left_rule_id, link.right_rule_id, link.vector_score
+  from jsonb_to_recordset(p_links) as link(
+    id uuid,
+    left_rule_id uuid,
+    right_rule_id uuid,
+    vector_score double precision
+  );
+end;
+$$;
+
+revoke all on function public.replace_owner_knowledge_rule_graph(uuid, jsonb, jsonb)
+  from public, anon, authenticated;
+grant execute on function public.replace_owner_knowledge_rule_graph(uuid, jsonb, jsonb)
+  to service_role;

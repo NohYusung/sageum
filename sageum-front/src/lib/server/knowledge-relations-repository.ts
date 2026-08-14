@@ -1,12 +1,12 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { descendantFolderIds } from '@/lib/folders/tree';
+import { selectOneHopRuleGraph } from '@/lib/relations/graph';
 import type {
-  AppliedRuleReference,
   KnowledgeGraph,
   KnowledgeGraphEdge,
-  KnowledgeGraphRuleDetail,
   KnowledgeRule,
   KnowledgeRuleBinding,
+  KnowledgeRuleLink,
   RuleDocumentSummary,
 } from '@/lib/relations/types';
 import type { Database } from '@/lib/supabase/database.types';
@@ -16,15 +16,19 @@ type RepositoryClient = SupabaseClient<Database>;
 
 type RuleRow = Database['public']['Tables']['knowledge_rules']['Row'];
 type BindingRow = Database['public']['Tables']['knowledge_rule_bindings']['Row'];
+type LinkRow = Database['public']['Tables']['knowledge_rule_links']['Row'];
 
 const GRAPH_NODE_WIDTH = 220;
 const GRAPH_NODE_HEIGHT = 74;
 
+type WithoutPosition<T> = T extends unknown ? Omit<T, 'position'> : never;
+type UnpositionedGraphNode = WithoutPosition<KnowledgeGraph['nodes'][number]>;
+
 function layoutGraphNodes(
-  nodes: Array<Omit<KnowledgeGraph['nodes'][number], 'position'>>,
+  nodes: UnpositionedGraphNode[],
   edges: KnowledgeGraphEdge[],
 ): KnowledgeGraph['nodes'] {
-  const connectedIds = new Set(edges.flatMap((edge) => [edge.sourceDocumentId, edge.targetDocumentId]));
+  const connectedIds = new Set(edges.flatMap((edge) => [edge.sourceNodeId, edge.targetNodeId]));
   const connectedNodes = nodes.filter((node) => connectedIds.has(node.id));
   const isolatedNodes = nodes.filter((node) => !connectedIds.has(node.id));
   const layout = new dagre.graphlib.Graph().setDefaultEdgeLabel(() => ({}));
@@ -32,7 +36,7 @@ function layoutGraphNodes(
   for (const node of connectedNodes) {
     layout.setNode(node.id, { width: GRAPH_NODE_WIDTH, height: GRAPH_NODE_HEIGHT });
   }
-  for (const edge of edges) layout.setEdge(edge.sourceDocumentId, edge.targetDocumentId);
+  for (const edge of edges) layout.setEdge(edge.sourceNodeId, edge.targetNodeId);
   dagre.layout(layout);
   const connected = connectedNodes.map((node) => {
     const position = layout.node(node.id);
@@ -80,6 +84,8 @@ function mapRule(
   row: RuleRow,
   ruleDocumentTitle: string,
   bindings: KnowledgeRuleBinding[],
+  links: KnowledgeRuleLink[],
+  reachableDocumentCount: number,
 ): KnowledgeRule {
   return {
     id: row.id,
@@ -95,6 +101,8 @@ function mapRule(
     confidence: row.confidence,
     enabled: row.enabled,
     bindings,
+    links,
+    reachableDocumentCount,
   };
 }
 
@@ -137,10 +145,24 @@ export async function listRuleDocuments(
   }
   const rules = rulesResult.data;
   const ruleIds = rules.map((rule) => rule.id);
-  const { data: bindings, error: bindingsError } = ruleIds.length
-    ? await supabase.from('knowledge_rule_bindings').select('*').eq('owner_id', ownerId).in('rule_id', ruleIds)
-    : { data: [], error: null };
-  if (bindingsError) throw new Error('규칙 바인딩을 조회하지 못했습니다.');
+  const [bindingsResult, leftLinksResult, rightLinksResult] = ruleIds.length
+    ? await Promise.all([
+      supabase.from('knowledge_rule_bindings').select('*').eq('owner_id', ownerId).in('rule_id', ruleIds),
+      supabase.from('knowledge_rule_links').select('*').eq('owner_id', ownerId).in('left_rule_id', ruleIds),
+      supabase.from('knowledge_rule_links').select('*').eq('owner_id', ownerId).in('right_rule_id', ruleIds),
+    ])
+    : [
+      { data: [], error: null },
+      { data: [], error: null },
+      { data: [], error: null },
+    ];
+  if (bindingsResult.error || leftLinksResult.error || rightLinksResult.error) {
+    throw new Error('규칙의 문서 앵커와 규칙 연결을 조회하지 못했습니다.');
+  }
+  const bindings = bindingsResult.data;
+  const linksById = new Map<string, LinkRow>();
+  [...leftLinksResult.data, ...rightLinksResult.data].forEach((link) => linksById.set(link.id, link));
+  const links = [...linksById.values()];
   const boundDocumentIds = [...new Set(bindings.map((binding) => binding.document_id))];
   const { data: boundDocuments, error: boundDocumentsError } = boundDocumentIds.length
     ? await supabase.from('documents').select('id,title').eq('owner_id', ownerId).in('id', boundDocumentIds)
@@ -163,13 +185,49 @@ export async function listRuleDocuments(
       mapBinding(binding, documentTitleById),
     ]);
   }
+  const ruleById = new Map(rules.map((rule) => [rule.id, rule]));
+  const sourceRuleDocumentTitleById = new Map(documents.map((document) => [document.id, document.title]));
+  const linksByRule = new Map<string, KnowledgeRuleLink[]>();
+  const reachableDocumentsByRule = new Map<string, Set<string>>();
+  for (const link of links) {
+    for (const [ruleId, linkedRuleId] of [
+      [link.left_rule_id, link.right_rule_id],
+      [link.right_rule_id, link.left_rule_id],
+    ] as const) {
+      const linkedRule = ruleById.get(linkedRuleId);
+      if (!linkedRule) continue;
+      linksByRule.set(ruleId, [
+        ...(linksByRule.get(ruleId) ?? []),
+        {
+          id: link.id,
+          ruleId,
+          linkedRuleId,
+          linkedRuleDocumentId: linkedRule.rule_document_id,
+          linkedRuleDocumentTitle: sourceRuleDocumentTitleById.get(linkedRule.rule_document_id)
+            ?? '비즈니스 규칙',
+          linkedSourceChunkId: linkedRule.source_chunk_id,
+          linkedStatement: linkedRule.statement,
+          vectorScore: link.vector_score,
+        },
+      ]);
+      const reachable = reachableDocumentsByRule.get(ruleId) ?? new Set<string>();
+      (bindingByRule.get(linkedRuleId) ?? []).forEach((binding) => reachable.add(binding.documentId));
+      reachableDocumentsByRule.set(ruleId, reachable);
+    }
+  }
   const rulesByDocument = new Map<string, KnowledgeRule[]>();
   for (const rule of rules) {
     const documentTitle = documents.find((document) => document.id === rule.rule_document_id)?.title
       ?? '비즈니스 규칙';
     rulesByDocument.set(rule.rule_document_id, [
       ...(rulesByDocument.get(rule.rule_document_id) ?? []),
-      mapRule(rule, documentTitle, bindingByRule.get(rule.id) ?? []),
+      mapRule(
+        rule,
+        documentTitle,
+        bindingByRule.get(rule.id) ?? [],
+        (linksByRule.get(rule.id) ?? []).sort((left, right) => right.vectorScore - left.vectorScore),
+        reachableDocumentsByRule.get(rule.id)?.size ?? 0,
+      ),
     ]);
   }
   return documents.map((document) => {
@@ -265,40 +323,49 @@ export async function getKnowledgeGraph(
   }
   const { data: documents, error: documentsError } = await documentQuery.limit(251);
   if (documentsError) throw new Error('그래프 문서를 조회하지 못했습니다.');
-  const truncatedNodes = documents.length > 250;
+  const truncatedDocuments = documents.length > 250;
   const visibleDocuments = documents.slice(0, 250);
   const visibleDocumentIds = new Set(visibleDocuments.map((document) => document.id));
-  if (!visibleDocuments.length) return { nodes: [], edges: [], truncated: truncatedNodes };
+  if (!visibleDocuments.length) return { nodes: [], edges: [], truncated: truncatedDocuments };
 
-  const { data: rules, error: rulesError } = await supabase
-    .from('knowledge_rules')
-    .select('*')
-    .eq('owner_id', ownerId)
-    .eq('enabled', true);
-  if (rulesError) throw new Error('그래프 규칙을 조회하지 못했습니다.');
-  const ruleDocumentIds = [...new Set(rules.map((rule) => rule.rule_document_id))];
-  const { data: ruleDocuments, error: ruleDocumentsError } = ruleDocumentIds.length
-    ? await supabase
+  const [{ data: rules, error: rulesError }, { data: ruleDocuments, error: ruleDocumentsError }] = await Promise.all([
+    supabase.from('knowledge_rules').select('*').eq('owner_id', ownerId).eq('enabled', true),
+    supabase
       .from('rule_documents')
       .select('document_id')
       .eq('owner_id', ownerId)
       .eq('enabled', true)
-      .eq('extraction_status', 'ready')
-      .in('document_id', ruleDocumentIds)
-    : { data: [], error: null };
-  if (ruleDocumentsError) throw new Error('그래프 규칙 문서 상태를 조회하지 못했습니다.');
+      .eq('extraction_status', 'ready'),
+  ]);
+  if (rulesError || ruleDocumentsError) throw new Error('그래프 규칙을 조회하지 못했습니다.');
   const activeRuleDocumentIds = new Set(ruleDocuments.map((document) => document.document_id));
   const activeRules = rules.filter((rule) => activeRuleDocumentIds.has(rule.rule_document_id));
-  const ruleIds = activeRules.map((rule) => rule.id);
-  const { data: bindings, error: bindingsError } = ruleIds.length
-    ? await supabase
-      .from('knowledge_rule_bindings')
-      .select('*')
-      .eq('owner_id', ownerId)
-      .in('rule_id', ruleIds)
-      .in('document_id', [...visibleDocumentIds])
-    : { data: [], error: null };
-  if (bindingsError) throw new Error('그래프 의미 유사도 바인딩을 조회하지 못했습니다.');
+  const activeRuleIds = activeRules.map((rule) => rule.id);
+  const [bindingsResult, linksResult] = activeRuleIds.length
+    ? await Promise.all([
+      supabase
+        .from('knowledge_rule_bindings')
+        .select('*')
+        .eq('owner_id', ownerId)
+        .in('rule_id', activeRuleIds)
+        .in('document_id', [...visibleDocumentIds]),
+      supabase
+        .from('knowledge_rule_links')
+        .select('*')
+        .eq('owner_id', ownerId),
+    ])
+    : [{ data: [], error: null }, { data: [], error: null }];
+  if (bindingsResult.error || linksResult.error) {
+    throw new Error('그래프의 규칙 연결과 문서 앵커를 조회하지 못했습니다.');
+  }
+  const bindings = bindingsResult.data;
+  const directlyVisibleRuleIds = new Set(bindings.map((binding) => binding.rule_id));
+  const { includedRuleIds, visibleLinks } = selectOneHopRuleGraph(
+    linksResult.data,
+    directlyVisibleRuleIds,
+  );
+  const includedRules = activeRules.filter((rule) => includedRuleIds.has(rule.id));
+  const ruleDocumentIds = [...new Set(includedRules.map((rule) => rule.rule_document_id))];
   const { data: ruleSourceDocuments, error: ruleSourceDocumentsError } = ruleDocumentIds.length
     ? await supabase.from('documents').select('id,title').eq('owner_id', ownerId).in('id', ruleDocumentIds)
     : { data: [], error: null };
@@ -307,87 +374,81 @@ export async function getKnowledgeGraph(
     ...visibleDocuments.map((document) => [document.id, document.title] as const),
     ...ruleSourceDocuments.map((document) => [document.id, document.title] as const),
   ]);
-  const bindingsByRule = new Map<string, KnowledgeRuleBinding[]>();
-  for (const binding of bindings) {
-    bindingsByRule.set(binding.rule_id, [
-      ...(bindingsByRule.get(binding.rule_id) ?? []),
-      mapBinding(binding, titleById),
-    ]);
-  }
-
-  const edgeRules = new Map<string, Map<string, KnowledgeGraphRuleDetail>>();
-  for (const rule of activeRules) {
-    const ruleBindings = bindingsByRule.get(rule.id) ?? [];
-    const bindingsByDocument = new Map<string, KnowledgeRuleBinding[]>();
-    for (const binding of ruleBindings) {
-      if (!visibleDocumentIds.has(binding.documentId)) continue;
-      bindingsByDocument.set(binding.documentId, [
-        ...(bindingsByDocument.get(binding.documentId) ?? []),
-        binding,
-      ]);
-    }
-    const documentIds = [...bindingsByDocument.keys()].sort();
-    for (let leftIndex = 0; leftIndex < documentIds.length; leftIndex += 1) {
-      for (let rightIndex = leftIndex + 1; rightIndex < documentIds.length; rightIndex += 1) {
-        const sourceDocumentId = documentIds[leftIndex];
-        const targetDocumentId = documentIds[rightIndex];
-        const pairBindings = [
-          ...(bindingsByDocument.get(sourceDocumentId) ?? []),
-          ...(bindingsByDocument.get(targetDocumentId) ?? []),
-        ];
-        const key = `${sourceDocumentId}:${targetDocumentId}`;
-        const byRule = edgeRules.get(key) ?? new Map<string, KnowledgeGraphRuleDetail>();
-        const applied: AppliedRuleReference = {
-          ruleId: rule.id,
-          ruleDocumentId: rule.rule_document_id,
-          ruleDocumentTitle: titleById.get(rule.rule_document_id) ?? '비즈니스 규칙',
-          sourceChunkId: rule.source_chunk_id,
-          statement: rule.statement,
-          score: Math.min(
-            Math.max(...(bindingsByDocument.get(sourceDocumentId) ?? []).map((binding) => binding.vectorScore)),
-            Math.max(...(bindingsByDocument.get(targetDocumentId) ?? []).map((binding) => binding.vectorScore)),
-          ),
-          bindingDocumentIds: [sourceDocumentId, targetDocumentId],
-        };
-        byRule.set(rule.id, {
-          ...applied,
-          evidenceQuote: rule.evidence_quote,
-          confidence: rule.confidence,
-          bindings: pairBindings,
-        });
-        edgeRules.set(key, byRule);
-      }
-    }
-  }
-
-  const edges: KnowledgeGraphEdge[] = [...edgeRules.entries()].slice(0, 1_000).map(([key, byRule]) => {
-    const [sourceDocumentId, targetDocumentId] = key.split(':');
-    const edgeRuleList = [...byRule.values()];
-    const first = edgeRuleList[0];
-    return {
-      id: key,
-      sourceDocumentId,
-      targetDocumentId,
-      label: `${first.statement}${edgeRuleList.length > 1 ? ` +${edgeRuleList.length - 1}` : ''}`,
-      score: Math.max(...edgeRuleList.map((rule) => rule.score)),
-      rules: edgeRuleList,
-    };
-  });
+  const ruleById = new Map(includedRules.map((rule) => [rule.id, rule]));
+  const allEdges: KnowledgeGraphEdge[] = [
+    ...bindings.flatMap((binding): KnowledgeGraphEdge[] => {
+      const rule = ruleById.get(binding.rule_id);
+      if (!rule) return [];
+      return [{
+        id: `rule-document:${binding.id}`,
+        kind: 'rule-document',
+        sourceNodeId: `rule:${rule.id}`,
+        targetNodeId: `document:${binding.document_id}`,
+        ruleId: rule.id,
+        ruleDocumentId: rule.rule_document_id,
+        ruleDocumentTitle: titleById.get(rule.rule_document_id) ?? '비즈니스 규칙',
+        statement: rule.statement,
+        documentId: binding.document_id,
+        documentTitle: titleById.get(binding.document_id) ?? '문서',
+        score: binding.vector_score,
+        anchor: mapBinding(binding, titleById),
+      }];
+    }),
+    ...visibleLinks.flatMap((link): KnowledgeGraphEdge[] => {
+      const leftRule = ruleById.get(link.left_rule_id);
+      const rightRule = ruleById.get(link.right_rule_id);
+      if (!leftRule || !rightRule) return [];
+      return [{
+        id: `rule-rule:${link.id}`,
+        kind: 'rule-rule',
+        sourceNodeId: `rule:${leftRule.id}`,
+        targetNodeId: `rule:${rightRule.id}`,
+        sourceRuleId: leftRule.id,
+        targetRuleId: rightRule.id,
+        sourceStatement: leftRule.statement,
+        targetStatement: rightRule.statement,
+        score: link.vector_score,
+      }];
+    }),
+  ];
   const relationCounts = new Map<string, number>();
-  for (const edge of edges) {
-    relationCounts.set(edge.sourceDocumentId, (relationCounts.get(edge.sourceDocumentId) ?? 0) + 1);
-    relationCounts.set(edge.targetDocumentId, (relationCounts.get(edge.targetDocumentId) ?? 0) + 1);
-  }
-  const nodes = visibleDocuments.map((document) => ({
-      id: document.id,
+  allEdges.forEach((edge) => {
+    relationCounts.set(edge.sourceNodeId, (relationCounts.get(edge.sourceNodeId) ?? 0) + 1);
+    relationCounts.set(edge.targetNodeId, (relationCounts.get(edge.targetNodeId) ?? 0) + 1);
+  });
+  const documentNodes = visibleDocuments.flatMap((document) => {
+    const relationCount = relationCounts.get(`document:${document.id}`) ?? 0;
+    if (!relationCount) return [];
+    return [{
+      id: `document:${document.id}`,
+      kind: 'document' as const,
+      documentId: document.id,
       title: document.title,
       sourceType: document.source_type,
       folderId: document.folder_id,
-      relationCount: relationCounts.get(document.id) ?? 0,
-    }));
+      relationCount,
+    }];
+  });
+  const ruleNodes = includedRules.map((rule) => ({
+    id: `rule:${rule.id}`,
+    kind: 'rule' as const,
+    ruleId: rule.id,
+    ruleDocumentId: rule.rule_document_id,
+    ruleDocumentTitle: titleById.get(rule.rule_document_id) ?? '비즈니스 규칙',
+    sourceChunkId: rule.source_chunk_id,
+    statement: rule.statement,
+    relationCount: relationCounts.get(`rule:${rule.id}`) ?? 0,
+  }));
+  const combinedNodes = [...documentNodes, ...ruleNodes];
+  const truncatedNodes = combinedNodes.length > 250;
+  const limitedNodes = combinedNodes.slice(0, 250);
+  const limitedNodeIds = new Set(limitedNodes.map((node) => node.id));
+  const edges = allEdges.filter((edge) => (
+    limitedNodeIds.has(edge.sourceNodeId) && limitedNodeIds.has(edge.targetNodeId)
+  )).slice(0, 1_000);
   return {
-    nodes: layoutGraphNodes(nodes, edges),
+    nodes: layoutGraphNodes(limitedNodes, edges),
     edges,
-    truncated: truncatedNodes || edgeRules.size > 1_000,
+    truncated: truncatedDocuments || truncatedNodes || allEdges.length > 1_000,
   };
 }

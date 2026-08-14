@@ -4,7 +4,7 @@ import { getSupabaseAdminClient } from '../src/lib/server/supabase';
 async function main() {
   const result = await rebuildAllSemanticRuleBindings(getSupabaseAdminClient());
   console.log(
-    `의미 관계 재색인 완료: 사용자 ${result.ownerCount}명 · 규칙 ${result.ruleCount}개 · 바인딩 ${result.bindingCount}개`,
+    `의미 관계 재색인 완료: 사용자 ${result.ownerCount}명 · 규칙 ${result.ruleCount}개 · 문서 앵커 ${result.bindingCount}개 · 규칙 연결 ${result.linkCount}개`,
   );
 }
 

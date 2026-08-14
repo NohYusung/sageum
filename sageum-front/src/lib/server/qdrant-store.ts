@@ -35,6 +35,9 @@ export type VectorSearchOptions = {
   documentIds?: string[];
   scoreThreshold?: number;
   embeddingModel: string;
+  denseQueryText?: string;
+  sparseQueryText?: string;
+  denseOnly?: boolean;
 };
 
 export type QdrantClientAdapter = Pick<
@@ -254,15 +257,27 @@ export class QdrantVectorStore {
     if (!normalizedText) {
       throw new QdrantInferenceError('Qdrant에 전달할 검색 질문이 비어 있습니다.');
     }
+    const denseQueryText = options.denseQueryText?.trim() || normalizedText;
+    const sparseQueryText = options.sparseQueryText?.trim() || normalizedText;
     const filter = { must };
     const limit = options.limit ?? 10;
     let response;
     try {
-      response = await this.client.query(this.collectionName, {
+      response = await this.client.query(this.collectionName, options.denseOnly ? {
+        query: {
+          text: denseQueryInferenceText(options.embeddingModel, denseQueryText),
+          model: options.embeddingModel,
+        },
+        using: QDRANT_DENSE_VECTOR_NAME,
+        filter,
+        limit,
+        score_threshold: options.scoreThreshold,
+        with_payload: true,
+      } : {
         prefetch: [
           {
             query: {
-              text: denseQueryInferenceText(options.embeddingModel, normalizedText),
+              text: denseQueryInferenceText(options.embeddingModel, denseQueryText),
               model: options.embeddingModel,
             },
             using: QDRANT_DENSE_VECTOR_NAME,
@@ -271,7 +286,7 @@ export class QdrantVectorStore {
           },
           {
             query: {
-              text: normalizedText,
+              text: sparseQueryText,
               model: QDRANT_BM25_MODEL,
               options: QDRANT_BM25_OPTIONS,
             },

@@ -78,6 +78,18 @@ function stringPayload(payload: Record<string, unknown> | null | undefined, key:
   return typeof found === 'string' ? found : '';
 }
 
+function mapRelationSearchPoint(point: { score: number; payload?: unknown }): RelationVectorSearchResult {
+  const payload = point.payload as Record<string, unknown> | null | undefined;
+  return {
+    id: stringPayload(payload, 'rule_id'),
+    score: point.score,
+    ruleDocumentId: stringPayload(payload, 'rule_document_id'),
+    ruleVersionId: stringPayload(payload, 'rule_version_id'),
+    sourceChunkId: stringPayload(payload, 'source_chunk_id'),
+    statement: stringPayload(payload, 'statement'),
+  };
+}
+
 export class QdrantRelationVectorStore {
   constructor(
     private readonly client: RelationQdrantClient,
@@ -183,11 +195,19 @@ export class QdrantRelationVectorStore {
     });
   }
 
-  async query(text: string, ownerId: string, embeddingModel: string, limit = 6) {
+  async query(
+    text: string,
+    ownerId: string,
+    embeddingModel: string,
+    limit = 6,
+    excludeRuleIds: string[] = [],
+  ) {
     const filter = { must: [
       { key: 'owner_id', match: { value: ownerId } },
       { key: 'embedding_model', match: { value: embeddingModel } },
-    ] };
+    ], ...(excludeRuleIds.length ? {
+      must_not: [{ key: 'rule_id', match: { any: [...new Set(excludeRuleIds)] } }],
+    } : {}) };
     const response = await this.client.query(this.collectionName, {
       prefetch: [
         {
@@ -208,17 +228,35 @@ export class QdrantRelationVectorStore {
       limit,
       with_payload: true,
     });
-    return response.points.map((point): RelationVectorSearchResult => {
-      const payload = point.payload as Record<string, unknown> | null | undefined;
-      return {
-        id: stringPayload(payload, 'rule_id'),
-        score: point.score,
-        ruleDocumentId: stringPayload(payload, 'rule_document_id'),
-        ruleVersionId: stringPayload(payload, 'rule_version_id'),
-        sourceChunkId: stringPayload(payload, 'source_chunk_id'),
-        statement: stringPayload(payload, 'statement'),
-      };
+    return response.points.map(mapRelationSearchPoint);
+  }
+
+  async querySimilarRules(
+    text: string,
+    ownerId: string,
+    embeddingModel: string,
+    limit = 5,
+    scoreThreshold = 0.35,
+    excludeRuleIds: string[] = [],
+  ) {
+    const filter = {
+      must: [
+        { key: 'owner_id', match: { value: ownerId } },
+        { key: 'embedding_model', match: { value: embeddingModel } },
+      ],
+      ...(excludeRuleIds.length ? {
+        must_not: [{ key: 'rule_id', match: { any: [...new Set(excludeRuleIds)] } }],
+      } : {}),
+    };
+    const response = await this.client.query(this.collectionName, {
+      query: { text: denseQueryInferenceText(embeddingModel, text), model: embeddingModel },
+      using: QDRANT_DENSE_VECTOR_NAME,
+      filter,
+      limit,
+      score_threshold: scoreThreshold,
+      with_payload: true,
     });
+    return response.points.map(mapRelationSearchPoint);
   }
 
   async deleteByRuleDocument(ownerId: string, ruleDocumentId: string) {

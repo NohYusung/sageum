@@ -16,6 +16,17 @@ export type KnowledgeRuleBinding = {
   vectorScore: number;
 };
 
+export type KnowledgeRuleLink = {
+  id: string;
+  ruleId: string;
+  linkedRuleId: string;
+  linkedRuleDocumentId: string;
+  linkedRuleDocumentTitle: string;
+  linkedSourceChunkId: string;
+  linkedStatement: string;
+  vectorScore: number;
+};
+
 export type KnowledgeRule = {
   id: string;
   ruleDocumentId: string;
@@ -30,6 +41,8 @@ export type KnowledgeRule = {
   confidence: number;
   enabled: boolean;
   bindings: KnowledgeRuleBinding[];
+  links: KnowledgeRuleLink[];
+  reachableDocumentCount: number;
 };
 
 export type RuleDocumentSummary = {
@@ -70,6 +83,9 @@ export type AppliedRuleReference = {
   statement: string;
   score: number;
   bindingDocumentIds: string[];
+  pathId: string;
+  depth: 0 | 1;
+  parentRuleId?: string;
 };
 
 export type RelationAwareSearchResult = {
@@ -78,8 +94,10 @@ export type RelationAwareSearchResult = {
   relationMode: 'expanded' | 'content-only' | 'fallback';
 };
 
-export type KnowledgeGraphNode = {
+export type KnowledgeGraphDocumentNode = {
   id: string;
+  kind: 'document';
+  documentId: string;
   title: string;
   sourceType: string;
   folderId: string | null;
@@ -87,20 +105,48 @@ export type KnowledgeGraphNode = {
   position: { x: number; y: number };
 };
 
-export type KnowledgeGraphRuleDetail = AppliedRuleReference & {
-  evidenceQuote: string;
-  confidence: number;
-  bindings: KnowledgeRuleBinding[];
+export type KnowledgeGraphRuleNode = {
+  id: string;
+  kind: 'rule';
+  ruleId: string;
+  ruleDocumentId: string;
+  ruleDocumentTitle: string;
+  sourceChunkId: string;
+  statement: string;
+  relationCount: number;
+  position: { x: number; y: number };
 };
 
-export type KnowledgeGraphEdge = {
+export type KnowledgeGraphNode = KnowledgeGraphDocumentNode | KnowledgeGraphRuleNode;
+
+export type KnowledgeGraphRuleRuleEdge = {
   id: string;
-  sourceDocumentId: string;
-  targetDocumentId: string;
-  label: string;
+  kind: 'rule-rule';
+  sourceNodeId: string;
+  targetNodeId: string;
+  sourceRuleId: string;
+  targetRuleId: string;
+  sourceStatement: string;
+  targetStatement: string;
   score: number;
-  rules: KnowledgeGraphRuleDetail[];
 };
+
+export type KnowledgeGraphRuleDocumentEdge = {
+  id: string;
+  kind: 'rule-document';
+  sourceNodeId: string;
+  targetNodeId: string;
+  ruleId: string;
+  ruleDocumentId: string;
+  ruleDocumentTitle: string;
+  statement: string;
+  documentId: string;
+  documentTitle: string;
+  score: number;
+  anchor: KnowledgeRuleBinding;
+};
+
+export type KnowledgeGraphEdge = KnowledgeGraphRuleRuleEdge | KnowledgeGraphRuleDocumentEdge;
 
 export type KnowledgeGraph = {
   nodes: KnowledgeGraphNode[];

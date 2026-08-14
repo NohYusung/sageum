@@ -321,6 +321,11 @@ export function BusinessRulesView({
             const expanded = expandedDocuments.has(document.documentId);
             const busy = busyIds.has(document.documentId);
             const bindingDocuments = new Set(document.rules.flatMap((rule) => rule.bindings.map((binding) => binding.documentId)));
+            const linkedRules = new Set(document.rules.flatMap((rule) => rule.links.map((link) => link.linkedRuleId)));
+            const reachableDocumentCount = document.rules.reduce(
+              (total, rule) => total + rule.reachableDocumentCount,
+              0,
+            );
             return (
               <article className={`rule-document-card ${document.extractionStatus}`} key={document.documentId}>
                 <div className="rule-document-summary">
@@ -344,7 +349,7 @@ export function BusinessRulesView({
                       <strong>{document.title}</strong>
                       <small>
                         {document.sourceMode === 'manual' ? <span className="rule-source-badge">직접 입력</span> : null}
-                        {document.originalFilename ?? document.sourceType.toUpperCase()} · {formatBytes(document.sizeBytes)} · 규칙 {document.rules.length}개 · 연결 문서 {bindingDocuments.size}개
+                        {document.originalFilename ?? document.sourceType.toUpperCase()} · {formatBytes(document.sizeBytes)} · 규칙 {document.rules.length}개 · 직접 문서 {bindingDocuments.size}개 · 연결 규칙 {linkedRules.size}개 · 도달 문서 {reachableDocumentCount}개
                       </small>
                     </span>
                     <ChevronDown size={17} className={expanded ? 'expanded' : ''} />
@@ -421,8 +426,25 @@ export function BusinessRulesView({
                           <button type="button" onClick={() => void onOpenEvidence(document.documentId, rule.sourceChunkId)}>
                             “{rule.evidenceQuote}” <ChevronRight size={13} />
                           </button>
+                          {rule.links.length ? (
+                            <div className="knowledge-rule-links">
+                              <strong>연결 규칙 {rule.links.length}개</strong>
+                              {rule.links.map((link) => (
+                                <button
+                                  key={link.id}
+                                  type="button"
+                                  onClick={() => void onOpenEvidence(link.linkedRuleDocumentId, link.linkedSourceChunkId)}
+                                >
+                                  {link.linkedStatement} · {link.vectorScore.toFixed(3)} · {link.linkedRuleDocumentTitle}
+                                  <ChevronRight size={13} />
+                                </button>
+                              ))}
+                            </div>
+                          ) : null}
                         </div>
-                        <span className="rule-binding-count">{new Set(rule.bindings.map((binding) => binding.documentId)).size}개 문서</span>
+                        <span className="rule-binding-count">
+                          직접 {new Set(rule.bindings.map((binding) => binding.documentId)).size} · 규칙 {rule.links.length} · 도달 {rule.reachableDocumentCount}
+                        </span>
                       </div>
                     ))}
                     {!document.rules.length ? <p className="rule-list-empty">추출된 유효 규칙이 없습니다.</p> : null}

@@ -110,6 +110,10 @@ import {
 } from '@/lib/rag/local-search';
 import type { DocumentChunk } from '@/lib/rag/types';
 import type { RuleDocumentSummary } from '@/lib/relations/types';
+import {
+  createRuleDocumentsRefreshGate,
+  fetchRuleDocuments,
+} from '@/lib/relations/rule-document-sync';
 
 type View = 'chat' | 'documents' | 'rules' | 'upload' | 'upload-status';
 type DocumentViewMode = 'list' | 'graph';
@@ -543,6 +547,10 @@ export function DocumentRagApp({
   const [oauthConnectionsModalOpen, setOAuthConnectionsModalOpen] = useState(false);
   const [documents, setDocuments] = useState<IndexedDocument[]>(() => initialDocuments);
   const [folders, setFolders] = useState<RepositoryFolder[]>(() => initialFolders);
+  const [ruleDocuments, setRuleDocuments] = useState<RuleDocumentSummary[]>(
+    () => initialRuleDocuments,
+  );
+  const [ruleDocumentsRefreshGate] = useState(createRuleDocumentsRefreshGate);
   const [messages, setMessages] = useState<ChatMessage[]>(INITIAL_MESSAGES);
   const [query, setQuery] = useState('');
   const [documentFilter, setDocumentFilter] = useState('');
@@ -614,6 +622,19 @@ export function DocumentRagApp({
   const retryingUploadJobIdsRef = useRef<Set<string>>(new Set());
   const cleaningUploadJobIdsRef = useRef<Set<string>>(new Set());
   const userInitial = userEmail.charAt(0).toLocaleUpperCase('ko-KR') || '?';
+  const updateRuleDocuments = useCallback((
+    updater: (current: RuleDocumentSummary[]) => RuleDocumentSummary[],
+  ) => {
+    ruleDocumentsRefreshGate.invalidate();
+    setRuleDocuments(updater);
+  }, [ruleDocumentsRefreshGate]);
+  const refreshRuleDocuments = useCallback(async () => {
+    const requestId = ruleDocumentsRefreshGate.begin();
+    const refreshed = await fetchRuleDocuments();
+    if (!ruleDocumentsRefreshGate.isCurrent(requestId)) return false;
+    setRuleDocuments(refreshed);
+    return true;
+  }, [ruleDocumentsRefreshGate]);
   const closeOAuthConnectionsModal = useCallback(() => {
     setOAuthConnectionsModalOpen(false);
     window.requestAnimationFrame(() => profileMenuTriggerRef.current?.focus());
@@ -2524,7 +2545,9 @@ export function DocumentRagApp({
 
         {view === 'rules' ? (
           <BusinessRulesView
-            initialRuleDocuments={initialRuleDocuments}
+            ruleDocuments={ruleDocuments}
+            onRuleDocumentsChange={updateRuleDocuments}
+            onRefreshRuleDocuments={refreshRuleDocuments}
             onOpenEvidence={openDocumentEvidence}
           />
         ) : null}

@@ -21,6 +21,7 @@ import {
   reuploadAndProcessDocument,
   retryUploadedDocument,
   uploadAndProcessDocument,
+  type DocumentUploadProgress,
 } from '@/lib/documents/browser-upload';
 import { MAX_MANUAL_RULE_CHARACTERS } from '@/lib/relations/manual-rule';
 import type {
@@ -42,13 +43,18 @@ async function errorMessage(response: Response, fallback: string) {
 }
 
 export function BusinessRulesView({
-  initialRuleDocuments,
+  ruleDocuments,
+  onRuleDocumentsChange,
+  onRefreshRuleDocuments,
   onOpenEvidence,
 }: {
-  initialRuleDocuments: RuleDocumentSummary[];
+  ruleDocuments: RuleDocumentSummary[];
+  onRuleDocumentsChange: (
+    updater: (current: RuleDocumentSummary[]) => RuleDocumentSummary[],
+  ) => void;
+  onRefreshRuleDocuments: () => Promise<boolean>;
   onOpenEvidence: (documentId: string, chunkId: string) => void | Promise<void>;
 }) {
-  const [ruleDocuments, setRuleDocuments] = useState(initialRuleDocuments);
   const [busyIds, setBusyIds] = useState<Set<string>>(() => new Set());
   const [uploading, setUploading] = useState(false);
   const [manualModal, setManualModal] = useState<{
@@ -63,7 +69,63 @@ export function BusinessRulesView({
   const replacementInputRef = useRef<HTMLInputElement | null>(null);
   const replacementTargetRef = useRef<{ documentId: string; jobId: string } | null>(null);
   const manualTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const manualTrackingControllersRef = useRef<Set<AbortController>>(new Set());
   const manualModalOpen = manualModal !== null;
+
+  useEffect(() => {
+    let active = true;
+    void onRefreshRuleDocuments().catch((error) => {
+      if (active) {
+        setMessage(error instanceof Error ? error.message : '규칙 문서를 새로고침하지 못했습니다.');
+      }
+    });
+    const refreshWhenVisible = () => {
+      if (document.visibilityState !== 'visible') return;
+      void onRefreshRuleDocuments().catch((error) => {
+        if (active) {
+          setMessage(error instanceof Error ? error.message : '규칙 문서를 새로고침하지 못했습니다.');
+        }
+      });
+    };
+    document.addEventListener('visibilitychange', refreshWhenVisible);
+    window.addEventListener('focus', refreshWhenVisible);
+    return () => {
+      active = false;
+      document.removeEventListener('visibilitychange', refreshWhenVisible);
+      window.removeEventListener('focus', refreshWhenVisible);
+      manualTrackingControllersRef.current.forEach((controller) => controller.abort());
+      manualTrackingControllersRef.current.clear();
+    };
+  }, [onRefreshRuleDocuments]);
+
+  const hasProcessingRule = ruleDocuments.some((document) => (
+    document.extractionStatus === 'processing'
+    || document.pendingRevisionStatus === 'processing'
+  ));
+
+  useEffect(() => {
+    if (!hasProcessingRule) return;
+    let active = true;
+    let timer = 0;
+    const poll = () => {
+      timer = window.setTimeout(() => {
+        void onRefreshRuleDocuments()
+          .catch((error) => {
+            if (active) {
+              setMessage(error instanceof Error ? error.message : '규칙 처리 상태를 확인하지 못했습니다.');
+            }
+          })
+          .finally(() => {
+            if (active) poll();
+          });
+      }, 1_000);
+    };
+    poll();
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [hasProcessingRule, onRefreshRuleDocuments]);
 
   useEffect(() => {
     if (!manualModalOpen) return;
@@ -80,13 +142,6 @@ export function BusinessRulesView({
     };
   }, [manualModalOpen, savingManual]);
 
-  async function refresh() {
-    const response = await fetch('/api/rule-documents', { cache: 'no-store' });
-    if (!response.ok) throw new Error(await errorMessage(response, '규칙 문서를 새로고침하지 못했습니다.'));
-    const payload = await response.json() as { ruleDocuments: RuleDocumentSummary[] };
-    setRuleDocuments(payload.ruleDocuments);
-  }
-
   function markBusy(id: string, busy: boolean) {
     setBusyIds((current) => {
       const next = new Set(current);
@@ -96,18 +151,20 @@ export function BusinessRulesView({
     });
   }
 
-  async function waitForManualRuleJob(jobId: string) {
+  async function waitForManualRuleJob(jobId: string, signal: AbortSignal) {
     for (let attempt = 0; attempt < 180; attempt += 1) {
+      if (signal.aborted) return false;
       await new Promise((resolve) => window.setTimeout(resolve, 1_000));
+      if (signal.aborted) return false;
       const response = await fetch(`/api/ingestion-jobs/${encodeURIComponent(jobId)}`, {
         cache: 'no-store',
+        signal,
       });
       if (!response.ok) throw new Error(await errorMessage(response, '규칙 처리 상태를 확인하지 못했습니다.'));
       const payload = await response.json() as {
         job: { status: string; lastError: string | null };
       };
-      await refresh();
-      if (payload.job.status === 'ready') return;
+      if (payload.job.status === 'ready') return true;
       if (payload.job.status === 'failed') {
         throw new Error(payload.job.lastError ?? '직접 입력 규칙 처리에 실패했습니다.');
       }
@@ -116,16 +173,22 @@ export function BusinessRulesView({
   }
 
   async function trackManualRule(result: ManualRuleMutationResponse, mode: 'create' | 'edit') {
-    await refresh().catch(() => undefined);
+    const controller = new AbortController();
+    manualTrackingControllersRef.current.add(controller);
+    await onRefreshRuleDocuments().catch(() => undefined);
     try {
-      await waitForManualRuleJob(result.jobId);
+      const completed = await waitForManualRuleJob(result.jobId, controller.signal);
+      if (!completed || controller.signal.aborted) return;
+      await onRefreshRuleDocuments();
       setMessage(mode === 'create'
         ? '직접 입력 규칙의 추출과 관계 색인을 완료했습니다.'
         : '직접 입력 규칙을 새 버전으로 교체했습니다.');
     } catch (error) {
+      if (controller.signal.aborted) return;
       setMessage(error instanceof Error ? error.message : '직접 입력 규칙 처리에 실패했습니다.');
-      await refresh().catch(() => undefined);
+      await onRefreshRuleDocuments().catch(() => undefined);
     } finally {
+      manualTrackingControllersRef.current.delete(controller);
       if (result.documentId) markBusy(result.documentId, false);
     }
   }
@@ -167,11 +230,19 @@ export function BusinessRulesView({
     if (!files?.length) return;
     setUploading(true);
     setMessage(null);
+    const discoveredDocumentIds = new Set<string>();
+    const refreshWhenCreated = (progress: DocumentUploadProgress) => {
+      if (!progress.documentId || discoveredDocumentIds.has(progress.documentId)) return;
+      discoveredDocumentIds.add(progress.documentId);
+      void onRefreshRuleDocuments().catch(() => undefined);
+    };
     const results = await Promise.allSettled(
-      Array.from(files).map((file) => uploadAndProcessDocument(file, null, undefined, null, 'rule')),
+      Array.from(files).map((file) => (
+        uploadAndProcessDocument(file, null, refreshWhenCreated, null, 'rule')
+      )),
     );
     const failed = results.filter((result) => result.status === 'rejected');
-    await refresh().catch(() => undefined);
+    await onRefreshRuleDocuments().catch(() => undefined);
     setMessage(failed.length
       ? `${results.length - failed.length}개 완료 · ${failed.length}개 실패`
       : `${results.length}개 규칙 문서의 추출과 관계 색인을 완료했습니다.`);
@@ -188,7 +259,7 @@ export function BusinessRulesView({
         body: JSON.stringify({ enabled: !document.enabled }),
       });
       if (!response.ok) throw new Error(await errorMessage(response, '규칙 문서 상태를 바꾸지 못했습니다.'));
-      setRuleDocuments((current) => current.map((item) => (
+      onRuleDocumentsChange((current) => current.map((item) => (
         item.documentId === document.documentId ? { ...item, enabled: !item.enabled } : item
       )));
     } catch (error) {
@@ -208,7 +279,7 @@ export function BusinessRulesView({
         body: JSON.stringify({ enabled }),
       });
       if (!response.ok) throw new Error(await errorMessage(response, '규칙 상태를 바꾸지 못했습니다.'));
-      setRuleDocuments((current) => current.map((document) => (
+      onRuleDocumentsChange((current) => current.map((document) => (
         document.documentId === documentId
           ? { ...document, rules: document.rules.map((rule) => rule.id === ruleId ? { ...rule, enabled } : rule) }
           : document
@@ -227,7 +298,7 @@ export function BusinessRulesView({
     try {
       const job = await fetchDocumentIngestionJob(document.ingestionJobId);
       await retryUploadedDocument(job);
-      await refresh();
+      await onRefreshRuleDocuments();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : '규칙 문서를 다시 처리하지 못했습니다.');
     } finally {
@@ -244,7 +315,7 @@ export function BusinessRulesView({
     try {
       const job = await fetchDocumentIngestionJob(target.jobId);
       await reuploadAndProcessDocument(job, file);
-      await refresh();
+      await onRefreshRuleDocuments();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : '규칙 원본을 다시 업로드하지 못했습니다.');
     } finally {
@@ -258,7 +329,14 @@ export function BusinessRulesView({
     setMessage(null);
     try {
       await deleteStoredDocument(document.documentId);
-      setRuleDocuments((current) => current.filter((item) => item.documentId !== document.documentId));
+      onRuleDocumentsChange((current) => (
+        current.filter((item) => item.documentId !== document.documentId)
+      ));
+      await onRefreshRuleDocuments().catch((error) => {
+        setMessage(error instanceof Error
+          ? `규칙은 삭제했지만 목록 동기화에 실패했습니다. ${error.message}`
+          : '규칙은 삭제했지만 목록 동기화에 실패했습니다.');
+      });
     } catch (error) {
       setMessage(error instanceof Error ? error.message : '규칙 문서를 삭제하지 못했습니다.');
     } finally {

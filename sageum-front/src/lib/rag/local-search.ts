@@ -22,6 +22,7 @@ export type SourceReference = {
   sourceSpans: DocumentSourceSpan[];
   retrievalRole?: 'seed' | 'rule' | 'expanded';
   ruleId?: string;
+  pathId?: string;
 };
 
 function queryTerms(query: string) {

@@ -59,7 +59,11 @@ export async function POST(request: Request) {
     if (related.evidence.length && configuration.generation.configured) {
       try {
         const generated = await generateClaudeGroundedAnswer(search.query, related.evidence);
-        presentation = claudeAnswerPresentation(generated);
+        presentation = claudeAnswerPresentation(
+          generated,
+          related.evidence,
+          related.appliedRules,
+        );
       } catch (error) {
         const message = error instanceof Error ? error.message : '알 수 없는 오류';
         console.error(`Claude Platform on AWS answer generation failed: ${message}`);

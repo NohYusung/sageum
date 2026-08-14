@@ -56,6 +56,7 @@ type PromptSource = {
   imageIndex?: number;
   retrievalRole: 'seed' | 'rule' | 'expanded';
   ruleId?: string;
+  pathId?: string;
   content: string;
 };
 
@@ -103,6 +104,7 @@ export function buildClaudeGroundingContext(sources: SourceReference[]) {
       imageIndex: source.imageIndex,
       retrievalRole: source.retrievalRole ?? 'seed',
       ruleId: source.ruleId,
+      pathId: source.pathId,
       content,
     });
     remainingCharacters -= content.length;

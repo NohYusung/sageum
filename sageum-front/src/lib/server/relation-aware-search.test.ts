@@ -4,6 +4,7 @@ import type { SourceReference } from '@/lib/rag/local-search';
 import {
   buildRuleSearchPaths,
   filterSeedResultsForPaths,
+  mergeExpandedResults,
   type StoredBinding,
   type StoredRule,
   type StoredRuleLink,
@@ -101,6 +102,48 @@ test('순환 또는 자기 연결은 경로를 중복 생성하지 않는다', (
   );
   assert.equal(paths.length, 1);
   assert.equal(paths[0]?.linkedRule?.id, 'linked');
+});
+
+test('같은 확장 청크는 최고 점수 결과의 관계 경로를 보존한다', () => {
+  const lowRule = rule('low-rule');
+  const highRule = rule('high-rule');
+  const result = (score: number): VectorSearchResult => ({
+    id: `result-${score}`,
+    score,
+    documentId: 'contract-document',
+    versionId: 'contract-version',
+    chunkId: 'structure-chunk',
+    documentTitle: '무상임대차 계약서',
+    sourceType: 'pdf',
+    ordinal: 3,
+    text: '구조는 철근콘크리트조이다.',
+    headingPath: ['건물 정보'],
+    sourceSpans: [],
+  });
+  const expanded = mergeExpandedResults([
+    {
+      path: {
+        id: 'low-path',
+        score: 0.7,
+        rootRule: lowRule,
+        documentIds: ['contract-document'],
+      },
+      results: [result(0.6)],
+    },
+    {
+      path: {
+        id: 'high-path',
+        score: 0.9,
+        rootRule: highRule,
+        documentIds: ['contract-document'],
+      },
+      results: [result(0.9)],
+    },
+  ], new Set());
+
+  assert.equal(expanded.length, 1);
+  assert.equal(expanded[0]?.ruleId, 'high-rule');
+  assert.equal(expanded[0]?.pathId, 'high-path');
 });
 
 test('관계 경로가 성공하면 RRF 단일 모달리티 잡음 seed를 경로 밖에서 제외한다', () => {

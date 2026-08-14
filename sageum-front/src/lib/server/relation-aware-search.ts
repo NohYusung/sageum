@@ -83,6 +83,7 @@ function sourceReference(
   result: VectorSearchResult,
   retrievalRole: SourceReference['retrievalRole'],
   ruleId?: string,
+  pathId?: string,
 ): SourceReference {
   return {
     documentId: result.documentId,
@@ -99,6 +100,7 @@ function sourceReference(
     sourceSpans: result.sourceSpans,
     retrievalRole,
     ruleId,
+    pathId,
   };
 }
 
@@ -378,20 +380,29 @@ function appliedRulesFromPaths(paths: DynamicPathResult[]) {
   });
 }
 
-function mergeExpandedResults(pathResults: DynamicPathResult[], seedChunkIds: Set<string>) {
-  const best = new Map<string, { result: VectorSearchResult; ruleId: string }>();
+export function mergeExpandedResults(
+  pathResults: DynamicPathResult[],
+  seedChunkIds: Set<string>,
+) {
+  const best = new Map<string, {
+    result: VectorSearchResult;
+    ruleId: string;
+    pathId: string;
+  }>();
   for (const { path, results } of pathResults) {
     const ruleId = path.linkedRule?.id ?? path.rootRule.id;
     for (const result of results) {
       if (seedChunkIds.has(result.chunkId)) continue;
       const current = best.get(result.chunkId);
-      if (!current || result.score > current.result.score) best.set(result.chunkId, { result, ruleId });
+      if (!current || result.score > current.result.score) {
+        best.set(result.chunkId, { result, ruleId, pathId: path.id });
+      }
     }
   }
   return [...best.values()]
     .sort((left, right) => right.result.score - left.result.score)
     .slice(0, MAX_EXPANDED_EVIDENCE)
-    .map(({ result, ruleId }) => sourceReference(result, 'expanded', ruleId));
+    .map(({ result, ruleId, pathId }) => sourceReference(result, 'expanded', ruleId, pathId));
 }
 
 export function filterSeedResultsForPaths(

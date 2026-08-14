@@ -1,5 +1,4 @@
 import type { SearchDocumentsResponse } from '@/lib/documents/contracts';
-import { composeExtractiveAnswer } from '@/lib/rag/local-search';
 import { parseSearchRequest, SearchRequestError } from '@/lib/rag/search-request';
 import { getAuthenticatedRequestContext } from '@/lib/server/api-auth';
 import { generateClaudeGroundedAnswer } from '@/lib/server/claude-rag-answer';
@@ -9,6 +8,11 @@ import {
   QdrantInferenceError,
 } from '@/lib/server/qdrant-store';
 import { searchRelationAwareRepository } from '@/lib/server/relation-aware-search';
+import {
+  claudeAnswerPresentation,
+  claudeFailurePresentation,
+  extractiveAnswerPresentation,
+} from '@/lib/server/search-answer-policy';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -50,28 +54,24 @@ export async function POST(request: Request) {
       documentIds: search.documentIds,
       topK: search.topK,
     });
-    let answer = composeExtractiveAnswer(related.evidence);
-    let answerSources = related.evidence;
-    let answerMode: SearchDocumentsResponse['answerMode'] = 'extractive-fallback';
+    let presentation = extractiveAnswerPresentation(related.evidence);
 
     if (related.evidence.length && configuration.generation.configured) {
       try {
         const generated = await generateClaudeGroundedAnswer(search.query, related.evidence);
-        answer = generated.answer;
-        answerSources = generated.insufficientEvidence ? [] : related.evidence;
-        answerMode = 'claude-platform-aws';
+        presentation = claudeAnswerPresentation(generated);
       } catch (error) {
         const message = error instanceof Error ? error.message : '알 수 없는 오류';
         console.error(`Claude Platform on AWS answer generation failed: ${message}`);
-        answer = `Claude 답변 생성에 실패하여 검색된 원문을 대신 표시합니다. ${answer}`;
+        presentation = claudeFailurePresentation(presentation);
       }
     }
 
     return Response.json({
-      answer,
-      sources: answerSources,
+      answer: presentation.answer,
+      sources: presentation.sources,
       mode: 'qdrant',
-      answerMode,
+      answerMode: presentation.answerMode,
       appliedRules: related.appliedRules,
       relationMode: related.relationMode,
     } satisfies SearchDocumentsResponse);

@@ -72,6 +72,24 @@ test('Claude가 선택한 복수 근거의 순서를 그대로 유지한다', ()
   assert.deepEqual(result.sources.map(({ chunkId }) => chunkId), ['second', 'first']);
 });
 
+test('Claude가 인용한 standalone 규칙을 최종 답변 근거로 노출한다', () => {
+  const standaloneRule = source('chunk-departure', '퇴사 규칙', {
+    retrievalRole: 'rule',
+    ruleId: 'departure',
+    pathId: 'rule:departure:standalone',
+  });
+  const result = claudeAnswerPresentation({
+    answer: '활성 규칙에 따르면 노유성은 두비덥을 퇴사했습니다.',
+    sources: [standaloneRule],
+    insufficientEvidence: false,
+  }, [standaloneRule], [{
+    ...appliedRule('departure', 'rule:departure:standalone', 0),
+    bindingDocumentIds: [],
+  }]);
+
+  assert.deepEqual(result.sources, [standaloneRule]);
+});
+
 test('근거 부족은 빈 근거를 유지하고 Claude 실패는 검색 후보 기반 fallback을 유지한다', () => {
   const candidate = source('candidate', '검색 후보');
   const insufficient = claudeAnswerPresentation({

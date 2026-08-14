@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { SourceReference } from '@/lib/rag/local-search';
 import {
+  appliedRulesForRulePaths,
   buildRuleSearchPaths,
   filterSeedResultsForPaths,
   mergeExpandedResults,
@@ -39,6 +40,64 @@ test('관계 근거 역할 계약은 seed, rule, expanded만 허용한다', () =
     'seed', 'rule', 'expanded',
   ];
   assert.deepEqual(roles, ['seed', 'rule', 'expanded']);
+});
+
+test('연결 경로가 없는 시작 규칙을 독립 사실 근거로 만든다', () => {
+  const standalone = rule('standalone');
+  const applied = appliedRulesForRulePaths(
+    [{ rule: standalone, score: 0.93 }],
+    [],
+  );
+
+  assert.deepEqual(applied, [{
+    ruleId: 'standalone',
+    ruleDocumentId: 'document-standalone',
+    ruleDocumentTitle: '비즈니스 규칙',
+    sourceChunkId: 'chunk-standalone',
+    statement: '규칙 standalone',
+    score: 0.93,
+    bindingDocumentIds: [],
+    pathId: 'rule:standalone:standalone',
+    depth: 0,
+  }]);
+});
+
+test('문서 경로에 포함된 규칙은 standalone 근거와 중복하지 않는다', () => {
+  const root = rule('root');
+  const linked = rule('linked');
+  const unrelated = rule('unrelated');
+  const applied = appliedRulesForRulePaths(
+    [
+      { rule: root, score: 0.95 },
+      { rule: linked, score: 0.9 },
+      { rule: unrelated, score: 0.85 },
+    ],
+    [{
+      id: 'root:linked',
+      score: 0.92,
+      rootRule: root,
+      linkedRule: linked,
+      linkScore: 0.88,
+      documentIds: ['knowledge-document'],
+    }],
+  );
+
+  assert.deepEqual(applied.map(({ ruleId, pathId }) => ({ ruleId, pathId })), [
+    { ruleId: 'root', pathId: 'root:linked' },
+    { ruleId: 'linked', pathId: 'root:linked' },
+    { ruleId: 'unrelated', pathId: 'rule:unrelated:standalone' },
+  ]);
+});
+
+test('문서·폴더 범위 검색에서는 범위 문서 경로가 없는 standalone 규칙을 제외한다', () => {
+  const root = rule('scoped-out');
+  const applied = appliedRulesForRulePaths(
+    [{ rule: root, score: 0.95 }],
+    [],
+    false,
+  );
+
+  assert.deepEqual(applied, []);
 });
 
 test('직접 문서 근거가 없어도 시작 규칙에서 연결 규칙의 문서 경로를 만든다', () => {

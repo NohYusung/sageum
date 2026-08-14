@@ -347,12 +347,29 @@ async function ruleSources(
       sourceSpans: [],
       retrievalRole: 'rule',
       ruleId: rule.ruleId,
+      pathId: rule.pathId,
     }];
   });
 }
 
-function appliedRulesFromPaths(paths: DynamicPathResult[]) {
-  return paths.flatMap(({ path }): AppliedRuleReference[] => {
+function standaloneAppliedRules(
+  roots: Array<{ rule: StoredRule; score: number }>,
+) {
+  return roots.map(({ rule, score }): AppliedRuleReference => ({
+    ruleId: rule.id,
+    ruleDocumentId: rule.rule_document_id,
+    ruleDocumentTitle: '비즈니스 규칙',
+    sourceChunkId: rule.source_chunk_id,
+    statement: rule.statement,
+    score,
+    bindingDocumentIds: [],
+    pathId: `rule:${rule.id}:standalone`,
+    depth: 0,
+  }));
+}
+
+function appliedRulesFromPaths(paths: RuleSearchPath[]) {
+  return paths.flatMap((path): AppliedRuleReference[] => {
     const root: AppliedRuleReference = {
       ruleId: path.rootRule.id,
       ruleDocumentId: path.rootRule.rule_document_id,
@@ -378,6 +395,39 @@ function appliedRulesFromPaths(paths: DynamicPathResult[]) {
       parentRuleId: path.rootRule.id,
     }];
   });
+}
+
+export function appliedRulesForRulePaths(
+  roots: Array<{ rule: StoredRule; score: number }>,
+  paths: RuleSearchPath[],
+  includeStandalone = true,
+) {
+  const pathRuleIds = new Set(paths.flatMap((path) => [
+    path.rootRule.id,
+    ...(path.linkedRule ? [path.linkedRule.id] : []),
+  ]));
+  return [
+    ...appliedRulesFromPaths(paths),
+    ...(includeStandalone
+      ? standaloneAppliedRules(roots).filter((rule) => !pathRuleIds.has(rule.ruleId))
+      : []),
+  ];
+}
+
+async function loadRuleEvidence(
+  supabase: RepositoryClient,
+  ownerId: string,
+  appliedRules: AppliedRuleReference[],
+) {
+  const sources = await ruleSources(supabase, ownerId, appliedRules);
+  const titleByDocument = new Map(sources.map((source) => [
+    source.documentId,
+    source.documentTitle,
+  ]));
+  appliedRules.forEach((rule) => {
+    rule.ruleDocumentTitle = titleByDocument.get(rule.ruleDocumentId) ?? '비즈니스 규칙';
+  });
+  return sources;
 }
 
 export function mergeExpandedResults(
@@ -485,76 +535,101 @@ export async function searchRelationAwareRepository(
     if (!roots.length) {
       return { evidence: seedSources, appliedRules: [], relationMode: 'content-only' };
     }
-    const links = await loadRuleLinks(input.supabase, input.ownerId, roots.map(({ rule }) => rule.id));
-    const rootRuleIds = new Set(roots.map(({ rule }) => rule.id));
-    const linkedRuleIds = [...new Set(links.flatMap((link) => [link.left_rule_id, link.right_rule_id]))]
-      .filter((ruleId) => !rootRuleIds.has(ruleId));
-    const linkedRules = await loadActiveRules(input.supabase, input.ownerId, linkedRuleIds);
-    const allRuleIds = [...rootRuleIds, ...linkedRules.map((rule) => rule.id)];
-    const bindings = await loadRuleBindings(
+    const standaloneApplied = appliedRulesForRulePaths(roots, [], !hasExplicitScope);
+    const standaloneEvidence = await loadRuleEvidence(
       input.supabase,
       input.ownerId,
-      allRuleIds,
-      hasExplicitScope ? new Set(scopedDocumentIds) : null,
+      standaloneApplied,
     );
-    const paths = buildRuleSearchPaths(roots, linkedRules, links, bindings);
-    if (!paths.length) {
-      return { evidence: seedSources, appliedRules: [], relationMode: 'content-only' };
-    }
-    const pathSearches = await Promise.allSettled(paths.map(async (path): Promise<DynamicPathResult> => {
-      const ruleContext = [path.rootRule.statement, path.linkedRule?.statement].filter(Boolean).join('\n');
-      const results = await vectorStore.query(input.query, input.ownerId, {
-        limit: MAX_PATH_EVIDENCE,
-        documentIds: path.documentIds,
-        scoreThreshold: contentScoreThreshold(),
-        embeddingModel: configuration.embedding.model,
-        denseQueryText: `${input.query}\n연결 규칙:\n${ruleContext}`,
-        sparseQueryText: input.query,
-      });
-      const latest = await activeLatestDocumentIds(
+
+    try {
+      const links = await loadRuleLinks(input.supabase, input.ownerId, roots.map(({ rule }) => rule.id));
+      const rootRuleIds = new Set(roots.map(({ rule }) => rule.id));
+      const linkedRuleIds = [...new Set(links.flatMap((link) => [link.left_rule_id, link.right_rule_id]))]
+        .filter((ruleId) => !rootRuleIds.has(ruleId));
+      const linkedRules = await loadActiveRules(input.supabase, input.ownerId, linkedRuleIds);
+      const allRuleIds = [...rootRuleIds, ...linkedRules.map((rule) => rule.id)];
+      const bindings = await loadRuleBindings(
         input.supabase,
         input.ownerId,
-        path.documentIds,
+        allRuleIds,
+        hasExplicitScope ? new Set(scopedDocumentIds) : null,
       );
+      const paths = buildRuleSearchPaths(roots, linkedRules, links, bindings);
+      if (!paths.length) {
+        return {
+          evidence: [...seedSources, ...standaloneEvidence],
+          appliedRules: standaloneApplied,
+          relationMode: 'content-only',
+        };
+      }
+      const pathSearches = await Promise.allSettled(paths.map(async (path): Promise<DynamicPathResult> => {
+        const ruleContext = [path.rootRule.statement, path.linkedRule?.statement].filter(Boolean).join('\n');
+        const results = await vectorStore.query(input.query, input.ownerId, {
+          limit: MAX_PATH_EVIDENCE,
+          documentIds: path.documentIds,
+          scoreThreshold: contentScoreThreshold(),
+          embeddingModel: configuration.embedding.model,
+          denseQueryText: `${input.query}\n연결 규칙:\n${ruleContext}`,
+          sparseQueryText: input.query,
+        });
+        const latest = await activeLatestDocumentIds(
+          input.supabase,
+          input.ownerId,
+          path.documentIds,
+        );
+        return {
+          path,
+          results: results.filter((result) => latest.get(result.documentId) === result.versionId),
+        };
+      }));
+      pathSearches.forEach((result) => {
+        if (result.status === 'rejected') {
+          console.error('Relation-aware document path search failed', result.reason);
+        }
+      });
+      const successfulPaths = pathSearches.flatMap((result) => (
+        result.status === 'fulfilled' && result.value.results.length ? [result.value] : []
+      ));
+      if (!successfulPaths.length) {
+        return {
+          evidence: [...seedSources, ...standaloneEvidence],
+          appliedRules: standaloneApplied,
+          relationMode: 'content-only',
+        };
+      }
+      const relevantSeedResults = filterSeedResultsForPaths(seedResults, successfulPaths);
+      const relevantSeedSources = relevantSeedResults.map((result) => sourceReference(result, 'seed'));
+      const expanded = mergeExpandedResults(
+        successfulPaths,
+        new Set(relevantSeedResults.map((result) => result.chunkId)),
+      );
+      if (!expanded.length) {
+        return {
+          evidence: [...relevantSeedSources, ...standaloneEvidence],
+          appliedRules: standaloneApplied,
+          relationMode: 'content-only',
+        };
+      }
+      const appliedRules = appliedRulesForRulePaths(
+        roots,
+        successfulPaths.map(({ path }) => path),
+        !hasExplicitScope,
+      );
+      const loadedRuleSources = await loadRuleEvidence(input.supabase, input.ownerId, appliedRules);
       return {
-        path,
-        results: results.filter((result) => latest.get(result.documentId) === result.versionId),
+        evidence: [...relevantSeedSources, ...loadedRuleSources, ...expanded],
+        appliedRules,
+        relationMode: 'expanded',
       };
-    }));
-    const successfulPaths = pathSearches.flatMap((result) => (
-      result.status === 'fulfilled' && result.value.results.length ? [result.value] : []
-    ));
-    const failedPathCount = pathSearches.filter((result) => result.status === 'rejected').length;
-    if (!successfulPaths.length) {
+    } catch (error) {
+      console.error('Relation-aware document expansion fell back to standalone rules', error);
       return {
-        evidence: seedSources,
-        appliedRules: [],
-        relationMode: failedPathCount === pathSearches.length ? 'fallback' : 'content-only',
+        evidence: [...seedSources, ...standaloneEvidence],
+        appliedRules: standaloneApplied,
+        relationMode: 'content-only',
       };
     }
-    const relevantSeedResults = filterSeedResultsForPaths(seedResults, successfulPaths);
-    const relevantSeedSources = relevantSeedResults.map((result) => sourceReference(result, 'seed'));
-    const expanded = mergeExpandedResults(
-      successfulPaths,
-      new Set(relevantSeedResults.map((result) => result.chunkId)),
-    );
-    if (!expanded.length) {
-      return { evidence: relevantSeedSources, appliedRules: [], relationMode: 'content-only' };
-    }
-    const appliedRules = appliedRulesFromPaths(successfulPaths);
-    const loadedRuleSources = await ruleSources(input.supabase, input.ownerId, appliedRules);
-    const ruleTitleByDocument = new Map(loadedRuleSources.map((source) => [
-      source.documentId,
-      source.documentTitle,
-    ]));
-    appliedRules.forEach((rule) => {
-      rule.ruleDocumentTitle = ruleTitleByDocument.get(rule.ruleDocumentId) ?? '비즈니스 규칙';
-    });
-    return {
-      evidence: [...relevantSeedSources, ...loadedRuleSources, ...expanded],
-      appliedRules,
-      relationMode: 'expanded',
-    };
   } catch (error) {
     console.error('Relation-aware expansion fell back to content-only search', error);
     return { evidence: seedSources, appliedRules: [], relationMode: 'fallback' };

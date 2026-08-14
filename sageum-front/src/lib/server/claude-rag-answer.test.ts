@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import type { SourceReference } from '@/lib/rag/local-search';
 import {
   buildClaudeGroundingContext,
+  CLAUDE_RAG_SYSTEM_PROMPT,
   INSUFFICIENT_EVIDENCE_ANSWER,
   normalizeClaudeGroundedAnswer,
 } from './claude-rag-answer';
@@ -51,6 +52,30 @@ test('유효한 인용이 없거나 Claude가 근거 부족으로 판정하면 �
   assert.deepEqual(noCitation.sources, []);
   assert.equal(insufficient.answer, INSUFFICIENT_EVIDENCE_ANSWER);
   assert.deepEqual(insufficient.sources, []);
+});
+
+test('활성 규칙 하나만으로도 규칙에 명시된 사실을 답변할 수 있다', () => {
+  const ruleSource: SourceReference = {
+    ...source('rule-chunk', '노유성은 두비덥을 퇴사했다.'),
+    documentTitle: '퇴사 규칙',
+    retrievalRole: 'rule',
+    ruleId: 'departure-rule',
+    pathId: 'rule:departure-rule:standalone',
+  };
+  const result = normalizeClaudeGroundedAnswer({
+    answer: '활성 비즈니스 규칙에 따르면 노유성은 두비덥을 퇴사했습니다.',
+    citationChunkIds: ['rule-chunk'],
+    insufficientEvidence: false,
+  }, [ruleSource]);
+
+  assert.equal(result.insufficientEvidence, false);
+  assert.deepEqual(result.sources, [ruleSource]);
+});
+
+test('Claude 정책은 규칙 단독 답변을 허용하고 규칙과 문서의 충돌 공개를 요구한다', () => {
+  assert.match(CLAUDE_RAG_SYSTEM_PROMPT, /seed나 expanded 없이도 답변/);
+  assert.match(CLAUDE_RAG_SYSTEM_PROMPT, /충돌 사실을 명시하고 양쪽 근거를 모두 인용/);
+  assert.match(CLAUDE_RAG_SYSTEM_PROMPT, /명시되지 않은 원인, 시점, 속성이나 세부 사실은 추론하지 마세요/);
 });
 
 test('Claude에 전달하는 검색 근거 수와 본문 길이를 제한하고 위치 정보를 보존한다', () => {

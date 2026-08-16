@@ -58,8 +58,8 @@ flowchart LR
   W -->|"규칙 전체 문장 색인"| RQ["관계 Qdrant Collection (롤백용 유지)"]
   W -->|"문서 대표 청크·규칙 공통 색인"| SQ["공통 의미 노드 Qdrant Collection"]
   Q -->|"직접 근거·유사 청크"| N
-  RQ -->|"질문과 유사한 규칙"| N
-  SQ -->|"질문 관련 규칙·저장된 의미 경로"| N
+  RQ -->|"Dense + BM25 규칙 검색"| N
+  SQ -->|"노드 유사도 후보"| P
   N -->|"직접·규칙·확장 근거"| C
   N -->|"PDF·내장 이미지 OCR/설명"| C
   C -->|"구조화 답변 + chunkId 인용"| N
@@ -183,8 +183,8 @@ flowchart LR
 ### 질문과 답변
 
 1. 로그인 사용자의 질문을 Qdrant에 전달합니다.
-2. 일반 문서 직접 검색과 공통 의미 Collection의 질문 관련 규칙 검색을 처음부터 병렬 실행합니다.
-3. 직접 검색 문서와 질문 관련 규칙을 시작 노드로 삼아 저장된 공통 의미 링크를 탐색합니다. 문서→문서는 최대 1 edge, 규칙→규칙→문서는 최대 2 edge입니다.
+2. 일반 문서 직접 검색과 관계 Collection의 dense + BM25 규칙 검색을 처음부터 병렬 실행하고 RRF로 규칙 순위를 결합합니다.
+3. 활성 규칙이 검색되면 규칙 노드만 시작점으로 사용하고, 규칙이 없을 때만 검색 점수 0.5 이상의 문서 Seed를 시작점으로 사용해 저장된 공통 의미 링크를 탐색합니다. 문서→문서는 최대 1 edge, 규칙→규칙→문서는 최대 2 edge입니다.
 4. 저장된 대표 청크 쌍은 후보 문서 ID와 연결 이유만 결정하며 최종 답변 근거로 직접 사용하지 않습니다.
 5. 의미 경로를 최대 2개 선택하고 연결 문서 최대 2개 안에서 Qdrant 검색을 병렬 실행합니다.
 6. 경로 검색의 dense 질의에는 원 질문과 경로 규칙 문장을 함께 넣고, BM25 질의에는 `구조` 같은 실제 검색어를 보존하기 위해 원 질문만 넣습니다.
@@ -193,7 +193,7 @@ flowchart LR
 9. Claude에는 `직접 근거(seed)`, `관계 규칙(rule)`, `연관 근거(expanded)`를 구분하고 의미 링크가 관련성 신호일 뿐이라는 제한을 함께 전달합니다.
 10. 질문과 유사한 활성 시작 규칙은 연결 경로나 동적 문서 근거가 없어도 독립적인 `rule` 사실 근거로 Claude와 MCP에 전달합니다.
 11. 규칙 문장에 없는 세부 내용은 생성하지 않으며, 규칙과 일반 문서가 충돌하면 어느 한쪽을 우선하지 않고 양쪽 근거와 충돌 사실을 함께 표시합니다.
-12. 일부 문서 경로 검색이 실패해도 성공한 경로와 일반 검색은 유지하며, 공통 의미 Collection이나 링크 조회가 실패한 경우 `relationMode: fallback`을 반환합니다.
+12. 일부 문서 경로 검색이 실패해도 성공한 경로와 일반 검색은 유지하며, 관계 Collection이나 의미 링크 조회가 실패한 경우 `relationMode: fallback`을 반환합니다. 의미 링크 장애 전 이미 검색된 독립 규칙은 가능한 범위에서 유지합니다.
 13. Claude가 검색 근거만 사용해 한국어 답변과 인용 청크 ID를 생성하고 서버가 유효한 출처만 반환합니다.
 
 ### 외부 에이전트 MCP
@@ -297,7 +297,7 @@ SAGEUM_MCP_ACCESS_TOKEN=
 
 - `NEXT_PUBLIC_` 접두사는 브라우저에 공개해도 되는 Supabase 값에만 사용합니다.
 - Supabase secret, Qdrant API key, Claude API key는 서버 환경변수로만 저장합니다.
-- 질문→규칙 검색은 `QDRANT_RULE_BINDING_SCORE_THRESHOLD`, 저장된 노드→노드 의미 링크는 `QDRANT_SEMANTIC_LINK_SCORE_THRESHOLD`를 사용합니다.
+- 질문→규칙 하이브리드 검색은 `QDRANT_RELATION_SCORE_THRESHOLD`, 규칙→문서 바인딩은 `QDRANT_RULE_BINDING_SCORE_THRESHOLD`, 저장된 노드→노드 의미 링크는 `QDRANT_SEMANTIC_LINK_SCORE_THRESHOLD`를 사용합니다.
 - Claude workspace의 생성 리전과 `AWS_REGION`이 일치해야 합니다.
 - `SAGEUM_MCP_ACCESS_TOKEN`은 로컬 스모크 테스트용 단기 OAuth 토큰이며 Vercel에는 설정하지 않습니다.
 - MCP의 실제 사용자 범위는 검증된 Supabase OAuth JWT의 `sub`에서 결정됩니다.

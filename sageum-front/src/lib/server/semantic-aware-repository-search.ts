@@ -1,6 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { descendantFolderIds } from '@/lib/folders/tree';
-import { calibratedSemanticScore } from '@/lib/semantic-graph/model';
 import type {
   AppliedRuleReference,
   AppliedSemanticLinkReference,
@@ -10,7 +9,7 @@ import type { SourceReference } from '@/lib/rag/local-search';
 import type { Database } from '@/lib/supabase/database.types';
 import { getProviderConfiguration } from './env';
 import { getQdrantVectorStore, type VectorSearchResult } from './qdrant-store';
-import { getQdrantSemanticNodeVectorStore } from './semantic-node-vector-store';
+import { getQdrantRelationVectorStore } from './relation-vector-store';
 
 type RepositoryClient = SupabaseClient<Database>;
 type SemanticNode = Database['public']['Tables']['knowledge_semantic_nodes']['Row'];
@@ -41,6 +40,7 @@ type SemanticSearchPath = {
 const MAX_SEED_EVIDENCE = 4;
 const MAX_EXPANDED_EVIDENCE = 4;
 const MAX_PATHS = 2;
+export const MIN_SEMANTIC_DOCUMENT_ROOT_SCORE = 0.5;
 
 export function prioritizeSemanticPathCandidates<
   T extends { rootNodeKind: 'document' | 'rule'; score: number },
@@ -53,23 +53,50 @@ export function prioritizeSemanticPathCandidates<
   });
 }
 
+export function selectHybridRuleCandidates<
+  THit extends { id: string; score: number },
+  TRule extends { id: string },
+>(hits: THit[], rules: TRule[], scoreThreshold: number, limit = 2) {
+  const ruleById = new Map(rules.map((rule) => [rule.id, rule]));
+  return hits.flatMap((hit) => {
+    if (hit.score < scoreThreshold) return [];
+    const rule = ruleById.get(hit.id);
+    return rule ? [{ rule, score: hit.score }] : [];
+  }).slice(0, limit);
+}
+
+export function selectSemanticRootCandidates<T extends { score: number }>(
+  ruleRoots: T[],
+  documentRoots: T[],
+  hasActiveRuleRoots = ruleRoots.length > 0,
+) {
+  return hasActiveRuleRoots
+    ? ruleRoots
+    : documentRoots.filter((root) => root.score >= MIN_SEMANTIC_DOCUMENT_ROOT_SCORE);
+}
+
+export function filterSeedResultsForSemanticPaths<
+  TSeed extends { documentId: string; score: number },
+  TPath extends { targetDocumentId: string },
+>(seeds: TSeed[], paths: TPath[], hasActiveRuleRoots: boolean) {
+  if (!hasActiveRuleRoots || !paths.length) return seeds;
+  const pathDocumentIds = new Set(paths.map((path) => path.targetDocumentId));
+  return seeds.filter((seed) => (
+    seed.score > MIN_SEMANTIC_DOCUMENT_ROOT_SCORE
+    || pathDocumentIds.has(seed.documentId)
+  ));
+}
+
 function contentThreshold() {
   const configured = Number.parseFloat(process.env.QDRANT_SCORE_THRESHOLD?.trim() ?? '0.2');
   return Number.isFinite(configured) && configured >= 0 ? configured : 0.2;
 }
 
-function semanticThreshold() {
+function relationRetrievalThreshold() {
   const configured = Number.parseFloat(
-    process.env.QDRANT_SEMANTIC_LINK_SCORE_THRESHOLD?.trim() ?? '0.35',
+    process.env.QDRANT_RELATION_SCORE_THRESHOLD?.trim() ?? '0.35',
   );
   return Number.isFinite(configured) && configured >= 0 ? configured : 0.35;
-}
-
-function semanticRuleRetrievalThreshold() {
-  const configured = Number.parseFloat(
-    process.env.QDRANT_RULE_BINDING_SCORE_THRESHOLD?.trim() ?? '0.2',
-  );
-  return Number.isFinite(configured) && configured >= 0 ? configured : 0.2;
 }
 
 function sourceFromVector(
@@ -360,7 +387,7 @@ export async function searchUnifiedSemanticRepository(
 ): Promise<RelationAwareSearchResult> {
   const configuration = getProviderConfiguration();
   const vectorStore = getQdrantVectorStore();
-  const semanticStore = getQdrantSemanticNodeVectorStore();
+  const relationStore = getQdrantRelationVectorStore();
   await vectorStore.ensureCollection(configuration.embedding.dimensions);
   const scope = await resolveScope(input);
   const explicitScope = Boolean(input.folderId || input.documentIds?.length);
@@ -369,7 +396,7 @@ export async function searchUnifiedSemanticRepository(
   }
   const latestByDocument = await activeDocuments(input.supabase, input.ownerId, scope, explicitScope);
   const topK = Math.min(Math.max(input.topK ?? MAX_SEED_EVIDENCE, 1), 20);
-  const [baseSearch, semanticSearch] = await Promise.allSettled([
+  const [baseSearch, ruleSearch] = await Promise.allSettled([
     vectorStore.query(input.query, input.ownerId, {
       limit: Math.min(topK * 2, 40),
       documentIds: explicitScope ? scope : undefined,
@@ -377,12 +404,11 @@ export async function searchUnifiedSemanticRepository(
       embeddingModel: configuration.embedding.model,
     }),
     (async () => {
-      await semanticStore.ensureCollection(configuration.embedding.dimensions);
-      return semanticStore.queryRules(
+      await relationStore.ensureCollection(configuration.embedding.dimensions);
+      return relationStore.query(
         input.query,
         input.ownerId,
         configuration.embedding.model,
-        semanticRuleRetrievalThreshold(),
         8,
       );
     })(),
@@ -392,23 +418,38 @@ export async function searchUnifiedSemanticRepository(
     latestByDocument.get(result.documentId) === result.versionId
   )).slice(0, Math.min(topK, MAX_SEED_EVIDENCE));
   const seedSources = seeds.map((result) => sourceFromVector(result, 'seed'));
-  if (semanticSearch.status === 'rejected') {
-    console.error('Unified semantic search fell back to content search', semanticSearch.reason);
+  if (ruleSearch.status === 'rejected') {
+    console.error('Hybrid rule search fell back to content search', ruleSearch.reason);
     return { evidence: seedSources, appliedRules: [], appliedSemanticLinks: [], relationMode: 'fallback' };
   }
 
+  let rootRules: Array<{ rule: StoredRule; score: number }>;
   try {
     const activeRootRules = await activeRules(
       input.supabase,
       input.ownerId,
-      semanticSearch.value.map((hit) => hit.ruleId),
+      ruleSearch.value.map((hit) => hit.id),
     );
-    const rootRuleById = new Map(activeRootRules.map((rule) => [rule.id, rule]));
-    const rootRules = semanticSearch.value.flatMap((hit) => {
-      const rule = rootRuleById.get(hit.ruleId);
-      const score = calibratedSemanticScore(hit.score, configuration.embedding.model);
-      return rule && score >= semanticRuleRetrievalThreshold() ? [{ rule, score }] : [];
-    }).slice(0, 2);
+    rootRules = selectHybridRuleCandidates(
+      ruleSearch.value,
+      activeRootRules,
+      relationRetrievalThreshold(),
+      2,
+    );
+  } catch (error) {
+    console.error('Active hybrid rules could not be loaded', error);
+    return { evidence: seedSources, appliedRules: [], appliedSemanticLinks: [], relationMode: 'fallback' };
+  }
+
+  const standaloneApplied = explicitScope ? [] : appliedRulesForSearch(rootRules, []);
+  let standaloneEvidence: SourceReference[] = [];
+  try {
+    standaloneEvidence = await ruleEvidence(input.supabase, input.ownerId, standaloneApplied);
+  } catch (error) {
+    console.error('Standalone rule evidence could not be loaded', error);
+  }
+
+  try {
     const [nodesResult, linksResult] = await Promise.all([
       input.supabase.from('knowledge_semantic_nodes').select('*').eq('owner_id', input.ownerId),
       input.supabase.from('knowledge_semantic_links').select('*').eq('owner_id', input.ownerId).order('semantic_score', { ascending: false }).limit(1000),
@@ -417,16 +458,27 @@ export async function searchUnifiedSemanticRepository(
     const nodes = nodesResult.data;
     const nodeByDocument = new Map(nodes.flatMap((node) => node.document_id ? [[node.document_id, node] as const] : []));
     const nodeByRule = new Map(nodes.flatMap((node) => node.rule_id ? [[node.rule_id, node] as const] : []));
-    const rootNodes = [
-      ...seeds.flatMap((seed) => {
-        const node = nodeByDocument.get(seed.documentId);
-        return node ? [{ node, score: seed.score }] : [];
-      }),
-      ...rootRules.flatMap(({ rule, score }) => {
-        const node = nodeByRule.get(rule.id);
-        return node ? [{ node, score }] : [];
-      }),
-    ];
+    const documentRootNodes = seeds.flatMap((seed) => {
+      const node = nodeByDocument.get(seed.documentId);
+      return node ? [{ node, score: seed.score }] : [];
+    });
+    const ruleRootNodes = rootRules.flatMap(({ rule, score }) => {
+      const node = nodeByRule.get(rule.id);
+      return node ? [{ node, score }] : [];
+    });
+    const rootNodes = selectSemanticRootCandidates(
+      ruleRootNodes,
+      documentRootNodes,
+      rootRules.length > 0,
+    );
+    if (!rootNodes.length) {
+      return {
+        evidence: [...seedSources, ...standaloneEvidence],
+        appliedRules: standaloneApplied,
+        appliedSemanticLinks: [],
+        relationMode: 'content-only',
+      };
+    }
     const allRuleIds = nodes.flatMap((node) => node.rule_id ? [node.rule_id] : []);
     const allActiveRules = await activeRules(input.supabase, input.ownerId, allRuleIds);
     const rulesById = new Map(allActiveRules.map((rule) => [rule.id, rule]));
@@ -458,7 +510,13 @@ export async function searchUnifiedSemanticRepository(
     const successful = pathSearches.flatMap((result) => (
       result.status === 'fulfilled' && result.value.results.length ? [result.value] : []
     ));
-    const seedChunkIds = new Set(seeds.map((seed) => seed.chunkId));
+    const relevantSeeds = filterSeedResultsForSemanticPaths(
+      seeds,
+      successful.map(({ path }) => path),
+      rootRules.length > 0,
+    );
+    const relevantSeedSources = relevantSeeds.map((result) => sourceFromVector(result, 'seed'));
+    const seedChunkIds = new Set(relevantSeeds.map((seed) => seed.chunkId));
     const expandedByChunk = new Map<string, { result: VectorSearchResult; path: SemanticSearchPath }>();
     successful.forEach(({ path, results }) => results.forEach((result) => {
       if (seedChunkIds.has(result.chunkId)) return;
@@ -477,13 +535,18 @@ export async function searchUnifiedSemanticRepository(
     ).filter((rule) => !explicitScope || usedPaths.some((path) => path.rules.some((candidate) => candidate.id === rule.ruleId)));
     const ruleSources = await ruleEvidence(input.supabase, input.ownerId, appliedRules);
     return {
-      evidence: [...seedSources, ...ruleSources, ...expanded],
+      evidence: [...relevantSeedSources, ...ruleSources, ...expanded],
       appliedRules,
       appliedSemanticLinks: appliedLinks(usedPaths),
       relationMode: expanded.length ? 'expanded' : 'content-only',
     };
   } catch (error) {
-    console.error('Unified semantic expansion fell back to content search', error);
-    return { evidence: seedSources, appliedRules: [], appliedSemanticLinks: [], relationMode: 'fallback' };
+    console.error('Unified semantic expansion fell back to content and standalone rules', error);
+    return {
+      evidence: [...seedSources, ...standaloneEvidence],
+      appliedRules: standaloneApplied,
+      appliedSemanticLinks: [],
+      relationMode: 'fallback',
+    };
   }
 }

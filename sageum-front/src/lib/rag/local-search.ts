@@ -23,6 +23,9 @@ export type SourceReference = {
   retrievalRole?: 'seed' | 'rule' | 'expanded';
   ruleId?: string;
   pathId?: string;
+  expansionKind?: 'rule-path' | 'semantic-link';
+  semanticLinkId?: string;
+  semanticPathId?: string;
 };
 
 function queryTerms(query: string) {

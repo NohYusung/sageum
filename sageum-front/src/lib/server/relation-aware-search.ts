@@ -9,6 +9,7 @@ import type { Database } from '@/lib/supabase/database.types';
 import { getProviderConfiguration } from './env';
 import { getQdrantRelationVectorStore, type RelationVectorSearchResult } from './relation-vector-store';
 import { getQdrantVectorStore, type VectorSearchResult } from './qdrant-store';
+import { searchUnifiedSemanticRepository } from './semantic-aware-repository-search';
 
 type RepositoryClient = SupabaseClient<Database>;
 
@@ -476,7 +477,7 @@ function relationHitsByActiveRule(
   }).slice(0, MAX_ROOT_RULES);
 }
 
-export async function searchRelationAwareRepository(
+async function searchLegacyRelationAwareRepository(
   input: RelationAwareSearchInput,
 ): Promise<RelationAwareSearchResult> {
   const configuration = getProviderConfiguration();
@@ -634,4 +635,10 @@ export async function searchRelationAwareRepository(
     console.error('Relation-aware expansion fell back to content-only search', error);
     return { evidence: seedSources, appliedRules: [], relationMode: 'fallback' };
   }
+}
+
+export async function searchRelationAwareRepository(
+  input: RelationAwareSearchInput,
+): Promise<RelationAwareSearchResult> {
+  return searchUnifiedSemanticRepository(input);
 }

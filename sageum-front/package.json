@@ -16,6 +16,8 @@
     "qdrant:smoke": "node --env-file=.env.local --import tsx scripts/smoke-qdrant.ts",
     "qdrant:relations:setup": "node --env-file=.env.local --import tsx scripts/setup-relation-qdrant.ts",
     "qdrant:relations:reindex": "node --env-file=.env.local --import tsx scripts/reindex-semantic-rules.ts",
+    "qdrant:semantic:setup": "node --env-file=.env.local --import tsx scripts/setup-semantic-qdrant.ts",
+    "qdrant:semantic:reindex": "node --env-file=.env.local --import tsx scripts/reindex-semantic-graph.ts",
     "claude:smoke": "node --env-file=.env.local --import tsx scripts/smoke-claude-aws.ts",
     "mcp:smoke": "node --env-file=.env.local --import tsx scripts/smoke-mcp.ts"
   },

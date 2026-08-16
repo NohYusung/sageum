@@ -77,6 +77,7 @@ export async function POST(request: Request) {
       mode: 'qdrant',
       answerMode: presentation.answerMode,
       appliedRules: related.appliedRules,
+      appliedSemanticLinks: related.appliedSemanticLinks ?? [],
       relationMode: related.relationMode,
     } satisfies SearchDocumentsResponse);
   } catch (error) {

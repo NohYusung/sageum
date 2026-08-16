@@ -65,6 +65,8 @@ async function main() {
   const { data: documents, error } = await supabase
     .from('documents')
     .select('id, owner_id, title, source_type, latest_version_id')
+    .eq('document_kind', 'knowledge')
+    .eq('deletion_status', 'active')
     .not('latest_version_id', 'is', null)
     .order('updated_at', { ascending: true })
     .limit(1000);

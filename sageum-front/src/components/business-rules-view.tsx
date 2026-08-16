@@ -15,6 +15,7 @@ import {
   XCircle,
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { DocumentRenameDialog } from '@/components/document-rename-dialog';
 import { deleteStoredDocument } from '@/lib/documents/browser-delete';
 import {
   fetchDocumentIngestionJob,
@@ -65,6 +66,7 @@ export function BusinessRulesView({
   const [savingManual, setSavingManual] = useState(false);
   const [manualError, setManualError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [renameDocument, setRenameDocument] = useState<RuleDocumentSummary | null>(null);
   const [expandedDocuments, setExpandedDocuments] = useState<Set<string>>(() => new Set());
   const replacementInputRef = useRef<HTMLInputElement | null>(null);
   const replacementTargetRef = useRef<{ documentId: string; jobId: string } | null>(null);
@@ -473,7 +475,15 @@ export function BusinessRulesView({
                     >
                       <Pencil size={15} /> 편집
                     </button>
-                  ) : null}
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => setRenameDocument(document)}
+                    >
+                      <Pencil size={15} /> 이름 변경
+                    </button>
+                  )}
                   <button className="danger" type="button" disabled={busy} onClick={() => void remove(document)}>
                     <Trash2 size={15} /> 삭제
                   </button>
@@ -539,6 +549,29 @@ export function BusinessRulesView({
             </div>
           ) : null}
         </div>
+        {renameDocument ? (
+          <DocumentRenameDialog
+            currentName={renameDocument.originalFilename ?? renameDocument.title}
+            documentId={renameDocument.documentId}
+            onClose={() => setRenameDocument(null)}
+            onRenamed={(result) => {
+              const title = result.document.document.title;
+              onRuleDocumentsChange((current) => current.map((document) => (
+                document.documentId === renameDocument.documentId
+                  ? {
+                    ...document,
+                    title,
+                    originalFilename: result.document.document.name,
+                  }
+                  : document
+              )));
+              void onRefreshRuleDocuments();
+              setMessage(result.indexStatus === 'warning' && result.warning
+                ? result.warning
+                : '규칙 문서 이름을 변경했습니다.');
+            }}
+          />
+        ) : null}
       </div>
       {manualModal ? (
         <div

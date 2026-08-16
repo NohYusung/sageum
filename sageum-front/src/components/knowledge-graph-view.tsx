@@ -46,10 +46,18 @@ function layoutGraph(graph: KnowledgeGraph) {
     id: edge.id,
     source: edge.sourceNodeId,
     target: edge.targetNodeId,
-    label: edge.kind === 'rule-rule' ? '규칙 연결' : '문서 앵커',
+    label: edge.kind === 'semantic-link'
+      ? edge.pairKind === 'document-document'
+        ? '문서 의미 연결'
+        : edge.pairKind === 'rule-document'
+          ? '규칙·문서 의미 연결'
+          : '규칙 의미 연결'
+      : edge.kind === 'rule-rule' ? '규칙 연결' : '문서 앵커',
     data: edge,
     type: 'smoothstep',
-    className: `knowledge-graph-${edge.kind}-edge`,
+    className: edge.kind === 'semantic-link'
+      ? `knowledge-graph-semantic-${edge.pairKind}-edge`
+      : `knowledge-graph-${edge.kind}-edge`,
   }));
   return { nodes, edges };
 }
@@ -70,7 +78,19 @@ export function KnowledgeGraphView({
   const [error, setError] = useState<string | null>(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const [selectedRuleId, setSelectedRuleId] = useState<string | null>(null);
-  const laidOut = useMemo(() => layoutGraph(graph), [graph]);
+  const [visibility, setVisibility] = useState({
+    'document-document': true,
+    'rule-document': true,
+    'rule-rule': true,
+    isolated: true,
+  });
+  const filteredGraph = useMemo((): KnowledgeGraph => {
+    const filteredEdges = graph.edges.filter((edge) => edge.kind !== 'semantic-link' || visibility[edge.pairKind]);
+    if (visibility.isolated) return { ...graph, edges: filteredEdges };
+    const connected = new Set(filteredEdges.flatMap((edge) => [edge.sourceNodeId, edge.targetNodeId]));
+    return { ...graph, nodes: graph.nodes.filter((node) => connected.has(node.id)), edges: filteredEdges };
+  }, [graph, visibility]);
+  const laidOut = useMemo(() => layoutGraph(filteredGraph), [filteredGraph]);
   const [nodes, setNodes, onNodesChange] = useNodesState(laidOut.nodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(laidOut.edges);
 
@@ -116,7 +136,9 @@ export function KnowledgeGraphView({
   )) ?? null;
   const selectedRuleEdges = selectedRule
     ? graph.edges.filter((edge) => (
-      edge.kind === 'rule-rule'
+      edge.kind === 'semantic-link'
+        ? edge.sourceNodeId === selectedRule.id || edge.targetNodeId === selectedRule.id
+        : edge.kind === 'rule-rule'
         ? edge.sourceRuleId === selectedRule.ruleId || edge.targetRuleId === selectedRule.ruleId
         : edge.ruleId === selectedRule.ruleId
     ))
@@ -124,7 +146,24 @@ export function KnowledgeGraphView({
   return (
     <div className="knowledge-graph-shell">
       <div className="knowledge-graph-toolbar">
-        <div><strong>규칙·문서 관계 그래프</strong><small>저장된 규칙 연결과 문서 앵커를 실제 경로 그대로 표시합니다.</small></div>
+        <div><strong>통합 의미 관계 그래프</strong><small>문서와 규칙의 의미 유사도 연결 및 고립 노드를 함께 표시합니다.</small></div>
+        <div className="knowledge-graph-toggles" aria-label="그래프 연결 표시 필터">
+          {([
+            ['document-document', '문서↔문서'],
+            ['rule-document', '규칙↔문서'],
+            ['rule-rule', '규칙↔규칙'],
+            ['isolated', '고립 노드'],
+          ] as const).map(([key, label]) => (
+            <label key={key}>
+              <input
+                type="checkbox"
+                checked={visibility[key]}
+                onChange={(event) => setVisibility((current) => ({ ...current, [key]: event.target.checked }))}
+              />
+              <span>{label}</span>
+            </label>
+          ))}
+        </div>
       </div>
       {graph.truncated ? <p className="knowledge-graph-warning">그래프 표시 한도를 초과했습니다. 폴더·문서명 필터를 사용해 범위를 줄여 주세요.</p> : null}
       <div className="knowledge-graph-canvas">
@@ -189,10 +228,35 @@ function GraphEdgeDetails({
   return (
     <aside className="knowledge-graph-details">
       <header>
-        <div><span>RELATION DETAIL</span><strong>{edge.kind === 'rule-rule' ? '규칙 ↔ 규칙' : '규칙 ↔ 문서'}</strong></div>
+        <div><span>SEMANTIC LINK DETAIL</span><strong>{edge.kind === 'semantic-link' ? ({
+          'document-document': '문서 ↔ 문서',
+          'rule-document': '규칙 ↔ 문서',
+          'rule-rule': '규칙 ↔ 규칙',
+        } as const)[edge.pairKind] : edge.kind === 'rule-rule' ? '규칙 ↔ 규칙' : '규칙 ↔ 문서'}</strong></div>
         <button type="button" onClick={onClose} aria-label="관계 상세 닫기"><X size={17} /></button>
       </header>
-      {edge.kind === 'rule-rule' ? (
+      {edge.kind === 'semantic-link' ? (
+        <article>
+          <dl>
+            <div><dt>최종 의미 점수</dt><dd>{edge.score.toFixed(3)}</dd></div>
+            <div><dt>커버리지</dt><dd>{edge.coverageScore.toFixed(3)}</dd></div>
+            <div><dt>대표 청크 쌍</dt><dd>{edge.matchedPairCount}개</dd></div>
+          </dl>
+          {edge.evidence.map((evidence) => (
+            <div className="knowledge-graph-evidence-pair" key={evidence.id}>
+              <button type="button" onClick={() => void onOpenEvidence(evidence.leftDocumentId, evidence.leftChunkId)}>
+                {evidence.leftDocumentTitle} 원문 <ChevronRight size={13} />
+              </button>
+              <p>“{evidence.leftText}”</p>
+              <button type="button" onClick={() => void onOpenEvidence(evidence.rightDocumentId, evidence.rightChunkId)}>
+                {evidence.rightDocumentTitle} 원문 <ChevronRight size={13} />
+              </button>
+              <p>“{evidence.rightText}”</p>
+              <small>청크 쌍 점수 {evidence.pairScore.toFixed(3)}</small>
+            </div>
+          ))}
+        </article>
+      ) : edge.kind === 'rule-rule' ? (
         <article>
           <p>{edge.sourceStatement}</p>
           <p>{edge.targetStatement}</p>
@@ -236,8 +300,8 @@ function GraphRuleDetails({
           규칙 원문 · {rule.ruleDocumentTitle} <ChevronRight size={13} />
         </button>
         <dl>
-          <div><dt>직접 문서 연결</dt><dd>{edges.filter((edge) => edge.kind === 'rule-document').length}개</dd></div>
-          <div><dt>연결 규칙</dt><dd>{edges.filter((edge) => edge.kind === 'rule-rule').length}개</dd></div>
+          <div><dt>의미 연결</dt><dd>{edges.length}개</dd></div>
+          <div><dt>독립 규칙</dt><dd>{edges.length ? '아니오' : '예'}</dd></div>
         </dl>
       </article>
     </aside>

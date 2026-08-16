@@ -221,6 +221,179 @@ export type Database = {
           },
         ];
       };
+      knowledge_semantic_nodes: {
+        Row: {
+          content_hash: string;
+          created_at: string;
+          document_id: string | null;
+          embedding_model: string;
+          id: string;
+          indexed_at: string;
+          node_kind: string;
+          owner_id: string;
+          rule_id: string | null;
+          updated_at: string;
+          version_id: string;
+        };
+        Insert: {
+          content_hash: string;
+          created_at?: string;
+          document_id?: string | null;
+          embedding_model: string;
+          id: string;
+          indexed_at?: string;
+          node_kind: string;
+          owner_id: string;
+          rule_id?: string | null;
+          updated_at?: string;
+          version_id: string;
+        };
+        Update: {
+          content_hash?: string;
+          created_at?: string;
+          document_id?: string | null;
+          embedding_model?: string;
+          id?: string;
+          indexed_at?: string;
+          node_kind?: string;
+          owner_id?: string;
+          rule_id?: string | null;
+          updated_at?: string;
+          version_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'knowledge_semantic_nodes_document_owner_fkey';
+            columns: ['document_id', 'owner_id'];
+            isOneToOne: false;
+            referencedRelation: 'documents';
+            referencedColumns: ['id', 'owner_id'];
+          },
+          {
+            foreignKeyName: 'knowledge_semantic_nodes_rule_owner_fkey';
+            columns: ['rule_id', 'owner_id'];
+            isOneToOne: false;
+            referencedRelation: 'knowledge_rules';
+            referencedColumns: ['id', 'owner_id'];
+          },
+          {
+            foreignKeyName: 'knowledge_semantic_nodes_version_fkey';
+            columns: ['version_id'];
+            isOneToOne: false;
+            referencedRelation: 'document_versions';
+            referencedColumns: ['id'];
+          },
+        ];
+      };
+      knowledge_semantic_links: {
+        Row: {
+          coverage_score: number;
+          created_at: string;
+          embedding_model: string;
+          id: string;
+          left_node_id: string;
+          matched_pair_count: number;
+          owner_id: string;
+          right_node_id: string;
+          semantic_score: number;
+          updated_at: string;
+        };
+        Insert: {
+          coverage_score: number;
+          created_at?: string;
+          embedding_model: string;
+          id: string;
+          left_node_id: string;
+          matched_pair_count: number;
+          owner_id: string;
+          right_node_id: string;
+          semantic_score: number;
+          updated_at?: string;
+        };
+        Update: {
+          coverage_score?: number;
+          created_at?: string;
+          embedding_model?: string;
+          id?: string;
+          left_node_id?: string;
+          matched_pair_count?: number;
+          owner_id?: string;
+          right_node_id?: string;
+          semantic_score?: number;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'knowledge_semantic_links_left_node_owner_fkey';
+            columns: ['left_node_id', 'owner_id'];
+            isOneToOne: false;
+            referencedRelation: 'knowledge_semantic_nodes';
+            referencedColumns: ['id', 'owner_id'];
+          },
+          {
+            foreignKeyName: 'knowledge_semantic_links_right_node_owner_fkey';
+            columns: ['right_node_id', 'owner_id'];
+            isOneToOne: false;
+            referencedRelation: 'knowledge_semantic_nodes';
+            referencedColumns: ['id', 'owner_id'];
+          },
+        ];
+      };
+      knowledge_semantic_link_evidence: {
+        Row: {
+          created_at: string;
+          id: string;
+          left_chunk_id: string;
+          link_id: string;
+          ordinal: number;
+          owner_id: string;
+          pair_score: number;
+          right_chunk_id: string;
+        };
+        Insert: {
+          created_at?: string;
+          id?: string;
+          left_chunk_id: string;
+          link_id: string;
+          ordinal: number;
+          owner_id: string;
+          pair_score: number;
+          right_chunk_id: string;
+        };
+        Update: {
+          created_at?: string;
+          id?: string;
+          left_chunk_id?: string;
+          link_id?: string;
+          ordinal?: number;
+          owner_id?: string;
+          pair_score?: number;
+          right_chunk_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'knowledge_semantic_link_evidence_link_owner_fkey';
+            columns: ['link_id', 'owner_id'];
+            isOneToOne: false;
+            referencedRelation: 'knowledge_semantic_links';
+            referencedColumns: ['id', 'owner_id'];
+          },
+          {
+            foreignKeyName: 'knowledge_semantic_link_evidence_left_chunk_fkey';
+            columns: ['left_chunk_id'];
+            isOneToOne: false;
+            referencedRelation: 'document_chunks';
+            referencedColumns: ['id'];
+          },
+          {
+            foreignKeyName: 'knowledge_semantic_link_evidence_right_chunk_fkey';
+            columns: ['right_chunk_id'];
+            isOneToOne: false;
+            referencedRelation: 'document_chunks';
+            referencedColumns: ['id'];
+          },
+        ];
+      };
       knowledge_rule_bindings: {
         Row: {
           chunk_id: string;
@@ -699,6 +872,10 @@ export type Database = {
           storage_paths: string[];
         }[];
       };
+      rename_document: {
+        Args: { p_document_id: string; p_original_filename: string };
+        Returns: undefined;
+      };
       replace_knowledge_rule_extraction: {
         Args: {
           p_bindings: Json;
@@ -720,6 +897,15 @@ export type Database = {
         Args: {
           p_bindings: Json;
           p_links: Json;
+          p_owner_id: string;
+        };
+        Returns: undefined;
+      };
+      replace_knowledge_semantic_node_graph: {
+        Args: {
+          p_evidence: Json;
+          p_links: Json;
+          p_node: Json;
           p_owner_id: string;
         };
         Returns: undefined;

@@ -4,6 +4,7 @@ import { cleanupDocumentDeletion, type DocumentDeletionJob } from '@/lib/server/
 import { getProviderConfiguration } from '@/lib/server/env';
 import { getQdrantRelationVectorStore } from '@/lib/server/relation-vector-store';
 import { getQdrantVectorStore } from '@/lib/server/qdrant-store';
+import { getQdrantSemanticNodeVectorStore } from '@/lib/server/semantic-node-vector-store';
 
 export class OwnedDocumentDeletionError extends Error {
   constructor(
@@ -56,6 +57,8 @@ export async function deleteOwnedDocument(
           await Promise.all([
             getQdrantVectorStore().deleteByDocument(context.ownerId, documentId),
             getQdrantRelationVectorStore().deleteByRuleDocument(context.ownerId, documentId),
+            getQdrantSemanticNodeVectorStore().deleteByDocument(context.ownerId, documentId),
+            getQdrantSemanticNodeVectorStore().deleteByRuleDocument(context.ownerId, documentId),
           ]);
           return;
         }

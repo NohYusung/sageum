@@ -1,5 +1,5 @@
 import { getAuthenticatedRequestContext } from '@/lib/server/api-auth';
-import { getKnowledgeGraph } from '@/lib/server/knowledge-relations-repository';
+import { getSemanticKnowledgeGraph } from '@/lib/server/semantic-graph-repository';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -11,7 +11,7 @@ export async function GET(request: Request) {
   const folderId = searchParams.get('folderId')?.trim() || undefined;
   const documentQuery = searchParams.get('query')?.trim() || undefined;
   try {
-    const graph = await getKnowledgeGraph(context.supabase, context.ownerId, {
+    const graph = await getSemanticKnowledgeGraph(context.supabase, context.ownerId, {
       folderId,
       documentQuery,
     });

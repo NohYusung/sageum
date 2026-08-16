@@ -66,8 +66,52 @@ export function detectDocumentSourceType(name: string, mimeType: string) {
 }
 
 export function initialDocumentTitle(name: string) {
-  const withoutExtension = name.replace(/\.[^.]+$/u, '').trim();
-  return (withoutExtension || '제목 없는 문서').slice(0, 500);
+  return name.trim() || '제목 없는 문서';
+}
+
+function filenameExtension(name: string) {
+  const dot = name.lastIndexOf('.');
+  return dot > 0 && dot < name.length - 1 ? name.slice(dot) : '';
+}
+
+export function validateRenamedDocumentFilename(currentName: string, value: unknown) {
+  if (typeof value !== 'string') {
+    throw new DocumentValidationError('새 파일명이 필요합니다.');
+  }
+  const name = value.trim();
+  if (!name || name.length > 1024) {
+    throw new DocumentValidationError('파일명은 1자 이상 1,024자 이하여야 합니다.');
+  }
+  if (/[\\/\u0000-\u001f\u007f]/u.test(name) || name === '.' || name === '..') {
+    throw new DocumentValidationError('파일명에는 경로 문자나 제어 문자를 사용할 수 없습니다.');
+  }
+  const currentExtension = filenameExtension(currentName);
+  if (currentExtension && name === currentExtension) {
+    throw new DocumentValidationError('확장자를 제외한 파일명을 입력해 주세요.');
+  }
+  if (!currentExtension || filenameExtension(name) !== currentExtension) {
+    throw new DocumentValidationError(`파일 확장자 ${currentExtension || '(없음)'}는 변경할 수 없습니다.`);
+  }
+  if (!name.slice(0, -currentExtension.length).trim()) {
+    throw new DocumentValidationError('확장자를 제외한 파일명을 입력해 주세요.');
+  }
+  return name;
+}
+
+export function persistedDocumentTitle({
+  originalFilename,
+  sourceMode,
+  manualTitle,
+  parsedTitle,
+}: {
+  originalFilename: string;
+  sourceMode: 'upload' | 'manual';
+  manualTitle: string | null;
+  parsedTitle: string;
+}) {
+  return sourceMode === 'manual'
+    ? manualTitle?.trim() || parsedTitle
+    : originalFilename;
 }
 
 export function storageObjectName(versionId: string, sourceType: DocumentSourceType) {

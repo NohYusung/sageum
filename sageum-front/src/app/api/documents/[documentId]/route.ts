@@ -1,5 +1,6 @@
 import { getAuthenticatedRequestContext } from '@/lib/server/api-auth';
 import { getIndexedDocument } from '@/lib/server/document-repository';
+import { DocumentRenameError, renameOwnedDocument } from '@/lib/server/document-rename';
 import { deleteOwnedDocument, OwnedDocumentDeletionError } from '@/lib/server/owned-document-deletion';
 
 export const runtime = 'nodejs';
@@ -24,6 +25,38 @@ export async function GET(
   } catch (error) {
     console.error('Failed to load document', error);
     return Response.json({ error: '문서를 불러오지 못했습니다.' }, { status: 500 });
+  }
+}
+
+export async function PATCH(
+  request: Request,
+  { params }: { params: Promise<{ documentId: string }> },
+) {
+  const context = await getAuthenticatedRequestContext();
+  if (!context) return Response.json({ error: '로그인이 필요합니다.' }, { status: 401 });
+
+  const { documentId } = await params;
+  if (!UUID_PATTERN.test(documentId)) {
+    return Response.json({ error: '올바른 문서 식별자가 필요합니다.' }, { status: 400 });
+  }
+
+  let body: { name?: unknown };
+  try {
+    body = await request.json() as { name?: unknown };
+  } catch {
+    return Response.json({ error: '올바른 JSON 요청이 필요합니다.' }, { status: 400 });
+  }
+
+  try {
+    const result = await renameOwnedDocument(context, documentId, body.name);
+    return Response.json(result, { headers: { 'Cache-Control': 'no-store' } });
+  } catch (error) {
+    console.error('Document rename failed', error);
+    const renameError = error instanceof DocumentRenameError ? error : null;
+    return Response.json(
+      { error: renameError?.message ?? '문서 이름을 변경하지 못했습니다.' },
+      { status: renameError?.status ?? 500 },
+    );
   }
 }
 

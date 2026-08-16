@@ -106,6 +106,102 @@ function mapRule(
   };
 }
 
+async function loadSemanticRuleRelations(
+  supabase: RepositoryClient,
+  ownerId: string,
+  rules: RuleRow[],
+  ruleDocumentTitles: Map<string, string>,
+) {
+  const ruleIds = new Set(rules.map((rule) => rule.id));
+  const [{ data: nodes, error: nodesError }, { data: links, error: linksError }] = await Promise.all([
+    supabase.from('knowledge_semantic_nodes').select('*').eq('owner_id', ownerId),
+    supabase.from('knowledge_semantic_links').select('*').eq('owner_id', ownerId),
+  ]);
+  if (nodesError || linksError) throw new Error('공통 의미 규칙 연결을 조회하지 못했습니다.');
+  const nodeById = new Map(nodes.map((node) => [node.id, node]));
+  const ruleNodeByRuleId = new Map(nodes.flatMap((node) => (
+    node.node_kind === 'rule' && node.rule_id && ruleIds.has(node.rule_id)
+      ? [[node.rule_id, node] as const]
+      : []
+  )));
+  const relevantLinks = links.filter((link) => {
+    const left = nodeById.get(link.left_node_id);
+    const right = nodeById.get(link.right_node_id);
+    return Boolean(left?.rule_id && ruleIds.has(left.rule_id) || right?.rule_id && ruleIds.has(right.rule_id));
+  });
+  const linkIds = relevantLinks.map((link) => link.id);
+  const { data: evidence, error: evidenceError } = linkIds.length
+    ? await supabase.from('knowledge_semantic_link_evidence').select('*').eq('owner_id', ownerId).in('link_id', linkIds).order('ordinal')
+    : { data: [], error: null };
+  if (evidenceError) throw new Error('공통 의미 규칙 연결 근거를 조회하지 못했습니다.');
+  const chunkIds = [...new Set(evidence.flatMap((row) => [row.left_chunk_id, row.right_chunk_id]))];
+  const { data: chunks, error: chunksError } = chunkIds.length
+    ? await supabase.from('document_chunks').select('id,document_id,version_id,text').eq('owner_id', ownerId).in('id', chunkIds)
+    : { data: [], error: null };
+  if (chunksError) throw new Error('공통 의미 규칙 연결 청크를 조회하지 못했습니다.');
+  const documentIds = [...new Set(nodes.flatMap((node) => node.document_id ? [node.document_id] : []))];
+  const { data: knowledgeDocuments, error: documentsError } = documentIds.length
+    ? await supabase.from('documents').select('id,title').eq('owner_id', ownerId).in('id', documentIds)
+    : { data: [], error: null };
+  if (documentsError) throw new Error('공통 의미 연결 문서 제목을 조회하지 못했습니다.');
+  const titleByDocument = new Map(knowledgeDocuments.map((document) => [document.id, document.title]));
+  const chunkById = new Map(chunks.map((chunk) => [chunk.id, chunk]));
+  const evidenceByLink = new Map<string, typeof evidence>();
+  evidence.forEach((row) => evidenceByLink.set(row.link_id, [...(evidenceByLink.get(row.link_id) ?? []), row]));
+  const bindingsByRule = new Map<string, KnowledgeRuleBinding[]>();
+  const linksByRule = new Map<string, KnowledgeRuleLink[]>();
+  const directDocumentsByRule = new Map<string, Set<string>>();
+  for (const link of relevantLinks) {
+    const left = nodeById.get(link.left_node_id);
+    const right = nodeById.get(link.right_node_id);
+    if (!left || !right) continue;
+    for (const [ruleNode, targetNode] of [[left, right], [right, left]] as const) {
+      if (ruleNode.node_kind !== 'rule' || !ruleNode.rule_id || !ruleIds.has(ruleNode.rule_id)) continue;
+      if (targetNode.node_kind === 'document' && targetNode.document_id) {
+        const linkEvidence = (evidenceByLink.get(link.id) ?? [])[0];
+        const targetChunkId = targetNode.id === link.left_node_id
+          ? linkEvidence?.left_chunk_id
+          : linkEvidence?.right_chunk_id;
+        const targetChunk = targetChunkId ? chunkById.get(targetChunkId) : null;
+        if (!targetChunk) continue;
+        bindingsByRule.set(ruleNode.rule_id, [...(bindingsByRule.get(ruleNode.rule_id) ?? []), {
+          id: link.id,
+          ruleId: ruleNode.rule_id,
+          documentId: targetNode.document_id,
+          versionId: targetChunk.version_id,
+          chunkId: targetChunk.id,
+          documentTitle: titleByDocument.get(targetNode.document_id) ?? '문서',
+          chunkText: targetChunk.text,
+          vectorScore: link.semantic_score,
+        }]);
+        const documents = directDocumentsByRule.get(ruleNode.rule_id) ?? new Set<string>();
+        documents.add(targetNode.document_id);
+        directDocumentsByRule.set(ruleNode.rule_id, documents);
+      } else if (targetNode.node_kind === 'rule' && targetNode.rule_id && ruleIds.has(targetNode.rule_id)) {
+        const linked = rules.find((rule) => rule.id === targetNode.rule_id);
+        if (!linked) continue;
+        linksByRule.set(ruleNode.rule_id, [...(linksByRule.get(ruleNode.rule_id) ?? []), {
+          id: link.id,
+          ruleId: ruleNode.rule_id,
+          linkedRuleId: linked.id,
+          linkedRuleDocumentId: linked.rule_document_id,
+          linkedRuleDocumentTitle: ruleDocumentTitles.get(linked.rule_document_id) ?? '비즈니스 규칙',
+          linkedSourceChunkId: linked.source_chunk_id,
+          linkedStatement: linked.statement,
+          vectorScore: link.semantic_score,
+        }]);
+      }
+    }
+  }
+  const reachableByRule = new Map<string, number>();
+  linksByRule.forEach((linked, ruleId) => {
+    const reached = new Set<string>();
+    linked.forEach((link) => directDocumentsByRule.get(link.linkedRuleId)?.forEach((id) => reached.add(id)));
+    reachableByRule.set(ruleId, reached.size);
+  });
+  return { ruleNodeByRuleId, bindingsByRule, linksByRule, reachableByRule };
+}
+
 export async function listRuleDocuments(
   supabase: RepositoryClient,
   ownerId: string,
@@ -215,6 +311,12 @@ export async function listRuleDocuments(
       reachableDocumentsByRule.set(ruleId, reachable);
     }
   }
+  const semanticRelations = await loadSemanticRuleRelations(
+    supabase,
+    ownerId,
+    rules,
+    sourceRuleDocumentTitleById,
+  );
   const rulesByDocument = new Map<string, KnowledgeRule[]>();
   for (const rule of rules) {
     const documentTitle = documents.find((document) => document.id === rule.rule_document_id)?.title
@@ -224,9 +326,15 @@ export async function listRuleDocuments(
       mapRule(
         rule,
         documentTitle,
-        bindingByRule.get(rule.id) ?? [],
-        (linksByRule.get(rule.id) ?? []).sort((left, right) => right.vectorScore - left.vectorScore),
-        reachableDocumentsByRule.get(rule.id)?.size ?? 0,
+        semanticRelations.ruleNodeByRuleId.has(rule.id)
+          ? semanticRelations.bindingsByRule.get(rule.id) ?? []
+          : bindingByRule.get(rule.id) ?? [],
+        (semanticRelations.ruleNodeByRuleId.has(rule.id)
+          ? semanticRelations.linksByRule.get(rule.id) ?? []
+          : linksByRule.get(rule.id) ?? []).sort((left, right) => right.vectorScore - left.vectorScore),
+        semanticRelations.ruleNodeByRuleId.has(rule.id)
+          ? semanticRelations.reachableByRule.get(rule.id) ?? 0
+          : reachableDocumentsByRule.get(rule.id)?.size ?? 0,
       ),
     ]);
   }

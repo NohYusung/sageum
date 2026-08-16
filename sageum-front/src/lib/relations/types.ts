@@ -88,9 +88,27 @@ export type AppliedRuleReference = {
   parentRuleId?: string;
 };
 
+export type AppliedSemanticNodeReference = {
+  nodeId: string;
+  nodeKind: 'document' | 'rule';
+  documentId?: string;
+  ruleId?: string;
+};
+
+export type AppliedSemanticLinkReference = {
+  semanticLinkId: string;
+  semanticPathId: string;
+  depth: 1 | 2;
+  score: number;
+  coverageScore: number;
+  leftNode: AppliedSemanticNodeReference;
+  rightNode: AppliedSemanticNodeReference;
+};
+
 export type RelationAwareSearchResult = {
   evidence: SourceReference[];
   appliedRules: AppliedRuleReference[];
+  appliedSemanticLinks?: AppliedSemanticLinkReference[];
   relationMode: 'expanded' | 'content-only' | 'fallback';
 };
 
@@ -119,6 +137,33 @@ export type KnowledgeGraphRuleNode = {
 
 export type KnowledgeGraphNode = KnowledgeGraphDocumentNode | KnowledgeGraphRuleNode;
 
+export type KnowledgeGraphSemanticEvidence = {
+  id: string;
+  leftChunkId: string;
+  rightChunkId: string;
+  leftDocumentId: string;
+  rightDocumentId: string;
+  leftDocumentTitle: string;
+  rightDocumentTitle: string;
+  leftText: string;
+  rightText: string;
+  pairScore: number;
+  ordinal: number;
+};
+
+export type KnowledgeGraphSemanticEdge = {
+  id: string;
+  kind: 'semantic-link';
+  pairKind: 'document-document' | 'rule-document' | 'rule-rule';
+  sourceNodeId: string;
+  targetNodeId: string;
+  score: number;
+  coverageScore: number;
+  matchedPairCount: number;
+  evidence: KnowledgeGraphSemanticEvidence[];
+};
+
+/** @deprecated Read-only compatibility for pre-migration repository tests. */
 export type KnowledgeGraphRuleRuleEdge = {
   id: string;
   kind: 'rule-rule';
@@ -131,6 +176,7 @@ export type KnowledgeGraphRuleRuleEdge = {
   score: number;
 };
 
+/** @deprecated Read-only compatibility for the rollback graph model. */
 export type KnowledgeGraphRuleDocumentEdge = {
   id: string;
   kind: 'rule-document';
@@ -146,7 +192,10 @@ export type KnowledgeGraphRuleDocumentEdge = {
   anchor: KnowledgeRuleBinding;
 };
 
-export type KnowledgeGraphEdge = KnowledgeGraphRuleRuleEdge | KnowledgeGraphRuleDocumentEdge;
+export type KnowledgeGraphEdge =
+  | KnowledgeGraphSemanticEdge
+  | KnowledgeGraphRuleRuleEdge
+  | KnowledgeGraphRuleDocumentEdge;
 
 export type KnowledgeGraph = {
   nodes: KnowledgeGraphNode[];

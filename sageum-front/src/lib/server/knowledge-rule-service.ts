@@ -298,8 +298,8 @@ function manualRule(
 }
 
 async function processingWarning(
-  supabase: AdminClient,
-  ownerId: string,
+  _supabase: AdminClient,
+  _ownerId: string,
   rejectedReasons: string[],
   rules: ValidatedExtractedRule[],
   bindings: PersistableKnowledgeRuleBinding[],
@@ -307,41 +307,9 @@ async function processingWarning(
 ) {
   const messages: string[] = [];
   if (rejectedReasons.length) messages.push(`${rejectedReasons.length}개 규칙 후보 제외`);
-  const newRuleIds = new Set(rules.map((rule) => rule.id));
-  const directlyBoundRuleIds = new Set(bindings.map((binding) => binding.rule_id));
-  const linkedExistingRuleIds = [...new Set(links.flatMap((link) => (
-    newRuleIds.has(link.left_rule_id) && !newRuleIds.has(link.right_rule_id)
-      ? [link.right_rule_id]
-      : newRuleIds.has(link.right_rule_id) && !newRuleIds.has(link.left_rule_id)
-        ? [link.left_rule_id]
-        : []
-  )))];
-  let linkedBoundRuleIds = new Set<string>();
-  if (linkedExistingRuleIds.length) {
-    const { data, error } = await supabase
-      .from('knowledge_rule_bindings')
-      .select('rule_id')
-      .eq('owner_id', ownerId)
-      .in('rule_id', linkedExistingRuleIds);
-    if (error) throw new Error('연결 규칙의 문서 경로를 확인하지 못했습니다.');
-    linkedBoundRuleIds = new Set(data.map((binding) => binding.rule_id));
-  }
-  const hasUsablePath = rules.some((rule) => {
-    if (directlyBoundRuleIds.has(rule.id)) return true;
-    return links.some((link) => {
-      const linkedRuleId = link.left_rule_id === rule.id
-        ? link.right_rule_id
-        : link.right_rule_id === rule.id
-          ? link.left_rule_id
-          : null;
-      return linkedRuleId !== null && (
-        directlyBoundRuleIds.has(linkedRuleId) || linkedBoundRuleIds.has(linkedRuleId)
-      );
-    });
-  });
-  if (!hasUsablePath) {
-    messages.push('현재 활용 가능한 규칙·문서 연결 경로가 없습니다');
-  }
+  void rules;
+  void bindings;
+  void links;
   return messages.length ? messages.join(' · ') : null;
 }
 

@@ -1,5 +1,9 @@
 import type { IndexedDocument, SourceReference } from '@/lib/rag/local-search';
-import type { AppliedRuleReference, DocumentKind } from '@/lib/relations/types';
+import type {
+  AppliedRuleReference,
+  AppliedSemanticLinkReference,
+  DocumentKind,
+} from '@/lib/relations/types';
 
 export type DocumentUploadTicket = {
   documentId: string;
@@ -70,6 +74,16 @@ export type ProcessDocumentResponse = {
 
 export type IndexedDocumentResponse = ProcessDocumentResponse;
 
+export type RenameDocumentRequest = {
+  name: string;
+};
+
+export type RenameDocumentResponse = {
+  document: IndexedDocument;
+  indexStatus: 'ready' | 'warning';
+  warning?: string;
+};
+
 export type StartDocumentProcessingResponse = {
   jobId: string;
   workflowRunId: string | null;
@@ -95,6 +109,7 @@ export type SearchDocumentsResponse = {
   mode: 'qdrant';
   answerMode: 'claude-platform-aws' | 'extractive-fallback';
   appliedRules: AppliedRuleReference[];
+  appliedSemanticLinks: AppliedSemanticLinkReference[];
   relationMode: 'expanded' | 'content-only' | 'fallback';
 };
 

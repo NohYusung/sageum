@@ -8,6 +8,7 @@ import {
 } from '@/lib/server/document-deletion';
 import { getProviderConfiguration } from '@/lib/server/env';
 import { getQdrantVectorStore } from '@/lib/server/qdrant-store';
+import { getQdrantSemanticNodeVectorStore } from '@/lib/server/semantic-node-vector-store';
 
 export const runtime = 'nodejs';
 
@@ -92,7 +93,11 @@ export async function DELETE(
     await cleanupDocumentDeletion(deletionJob, {
       deleteVectors: async () => {
         if (providers.qdrant.configured) {
-          await getQdrantVectorStore().deleteByDocument(context.ownerId, documentId);
+          await Promise.all([
+            getQdrantVectorStore().deleteByDocument(context.ownerId, documentId),
+            getQdrantSemanticNodeVectorStore().deleteByDocument(context.ownerId, documentId),
+            getQdrantSemanticNodeVectorStore().deleteByRuleDocument(context.ownerId, documentId),
+          ]);
           return;
         }
         if (deletionJob.requiresVectorCleanup) {

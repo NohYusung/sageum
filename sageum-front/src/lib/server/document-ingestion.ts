@@ -1,6 +1,10 @@
 import { createHash } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { DOCUMENT_BUCKET, DocumentValidationError } from '@/lib/documents/validation';
+import {
+  DOCUMENT_BUCKET,
+  DocumentValidationError,
+  persistedDocumentTitle,
+} from '@/lib/documents/validation';
 import { CHUNKER_VERSION, chunkDocument } from '@/lib/rag/chunker';
 import type { IndexedDocument } from '@/lib/rag/local-search';
 import {
@@ -18,6 +22,11 @@ import {
   refreshBindingsForKnowledgeDocument,
 } from '@/lib/server/knowledge-rule-service';
 import { getQdrantRelationVectorStore } from '@/lib/server/relation-vector-store';
+import {
+  refreshKnowledgeDocumentSemanticNode,
+  refreshRuleDocumentSemanticNodes,
+} from '@/lib/server/semantic-graph-service';
+import { getQdrantSemanticNodeVectorStore } from '@/lib/server/semantic-node-vector-store';
 import {
   getQdrantVectorStore,
   QdrantConfigurationError,
@@ -325,6 +334,12 @@ export async function processDocumentIngestion(
       new Uint8Array(fileBuffer),
       parsedDocument,
     );
+    const documentTitle = persistedDocumentTitle({
+      originalFilename: version.original_filename,
+      sourceMode: ruleSourceMode,
+      manualTitle: manualDocumentTitle,
+      parsedTitle: parsed.title,
+    });
     await updateIngestionJob(supabase, execution.ownerId, execution.jobId, { stage: 'chunking' });
     const chunks = chunkDocument(parsed);
     if (!chunks.length) {
@@ -361,7 +376,7 @@ export async function processDocumentIngestion(
           chunk,
           ownerId: execution.ownerId,
           sourceType: parsed.sourceType,
-          documentTitle: manualDocumentTitle ?? parsed.title,
+          documentTitle,
           embeddingModel: providers.embedding.model,
         })));
       }
@@ -405,7 +420,7 @@ export async function processDocumentIngestion(
       const { error: documentUpdateError } = await supabase
         .from('documents')
         .update({
-          title: parsed.title,
+          title: documentTitle,
           source_type: parsed.sourceType,
           latest_version_id: execution.versionId,
           updated_at: processedAt,
@@ -417,6 +432,7 @@ export async function processDocumentIngestion(
 
     let ruleProcessing: Awaited<ReturnType<typeof processBusinessRuleDocument>> | null = null;
     let bindingRefreshWarning: string | null = null;
+    let semanticGraphWarning: string | null = null;
     if (documentKind === 'rule') {
       ruleProcessing = await processBusinessRuleDocument(
         supabase,
@@ -427,7 +443,7 @@ export async function processDocumentIngestion(
         {
           sourceMode: ruleSourceMode,
           manualContent: pendingManualContent,
-          documentTitle: parsed.title,
+          documentTitle,
           documentSourceType: parsed.sourceType,
           preserveExistingOnFailure: preserveRuleOnFailure,
         },
@@ -449,6 +465,29 @@ export async function processDocumentIngestion(
       }
     }
 
+    if (vectorIndexEnabled) {
+      try {
+        if (documentKind === 'rule') {
+          await refreshRuleDocumentSemanticNodes(
+            supabase,
+            execution.ownerId,
+            execution.documentId,
+          );
+        } else {
+          await refreshKnowledgeDocumentSemanticNode(
+            supabase,
+            execution.ownerId,
+            execution.documentId,
+          );
+        }
+      } catch (semanticGraphError) {
+        semanticGraphWarning = semanticGraphError instanceof Error
+          ? semanticGraphError.message
+          : '공통 의미 그래프 갱신에 실패했습니다.';
+        console.error('Unified semantic graph incremental refresh failed', semanticGraphError);
+      }
+    }
+
     const versionMetadata = {
       blockCount: parsed.blocks.length,
       chunkCount: chunks.length,
@@ -461,6 +500,7 @@ export async function processDocumentIngestion(
       relationVectorIndexed: documentKind === 'rule',
       ruleProcessing,
       bindingRefreshWarning,
+      semanticGraphWarning,
       embeddingProvider: vectorIndexEnabled ? providers.embedding.provider : null,
       embeddingModel: vectorIndexEnabled ? providers.embedding.model : null,
       embeddingDimensions: vectorIndexEnabled ? providers.embedding.dimensions : null,
@@ -526,6 +566,22 @@ export async function processDocumentIngestion(
         );
       } catch (cleanupError) {
         console.error('Failed to clean relation vectors after processing failure', cleanupError);
+      }
+    }
+    if (getProviderConfiguration().qdrant.configured && !preserveRuleOnFailure) {
+      try {
+        await Promise.all([
+          getQdrantSemanticNodeVectorStore().deleteByDocument(
+            execution.ownerId,
+            execution.documentId,
+          ),
+          getQdrantSemanticNodeVectorStore().deleteByRuleDocument(
+            execution.ownerId,
+            execution.documentId,
+          ),
+        ]);
+      } catch (cleanupError) {
+        console.error('Failed to clean semantic graph vectors after processing failure', cleanupError);
       }
     }
     console.error('Document processing failed', error);

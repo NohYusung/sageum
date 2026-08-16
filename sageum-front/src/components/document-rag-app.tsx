@@ -53,6 +53,7 @@ import {
 import { logoutAction } from '@/app/actions';
 import { OAuthConnectionsModal } from '@/components/oauth-connections-modal';
 import { BusinessRulesView } from '@/components/business-rules-view';
+import { DocumentRenameDialog } from '@/components/document-rename-dialog';
 import { KnowledgeGraphView } from '@/components/knowledge-graph-view';
 import type { OAuthConnectionSummary } from '@/lib/auth/oauth-connections';
 import {
@@ -98,6 +99,7 @@ import type {
   ApiErrorResponse,
   DocumentIngestionJob,
   DocumentIngestionStatus,
+  RenameDocumentResponse,
   SearchDocumentsResponse,
 } from '@/lib/documents/contracts';
 import { canResumeDocumentIngestion } from '@/lib/documents/ingestion-jobs';
@@ -274,9 +276,12 @@ function sourceLocation(source: SourceReference) {
   return null;
 }
 
-function retrievalRoleLabel(role: SourceReference['retrievalRole']) {
+function retrievalRoleLabel(
+  role: SourceReference['retrievalRole'],
+  expansionKind?: SourceReference['expansionKind'],
+) {
   if (role === 'rule') return '관계 규칙';
-  if (role === 'expanded') return '확장 근거';
+  if (role === 'expanded') return expansionKind === 'semantic-link' ? '연관 근거' : '확장 근거';
   return '직접 근거';
 }
 
@@ -361,6 +366,7 @@ function DocumentInspector({
   modal = false,
   onClose,
   onMoveDocument,
+  onRenameDocument,
   onDeleteDocument,
   onExpandStructure,
 }: {
@@ -373,12 +379,14 @@ function DocumentInspector({
   modal?: boolean;
   onClose?: () => void;
   onMoveDocument: (documentId: string, folderId: string | null) => void | Promise<void>;
+  onRenameDocument: (result: RenameDocumentResponse) => void;
   onDeleteDocument: (item: IndexedDocument) => void | Promise<void>;
   onExpandStructure: (chunkId: string) => void;
 }) {
   const DocumentIcon = fileIcon(item.document.sourceType);
   const previewChunk = item.chunks.find((chunk) => chunk.id === expandedStructureChunkId);
   const snippetPrefix = modal ? 'modal-structure-snippet' : 'structure-snippet';
+  const [renameOpen, setRenameOpen] = useState(false);
 
   return (
     <aside className={`document-inspector${modal ? ' document-inspector-modal' : ''}`}>
@@ -397,8 +405,19 @@ function DocumentInspector({
         <DocumentIcon size={28} />
       </span>
       <span className="eyebrow">DOCUMENT DETAIL</span>
-      <h2>{item.document.title}</h2>
-      <p>{item.document.name}</p>
+      <div className="document-inspector-title">
+        <h2>{item.document.title}</h2>
+        {item.status !== 'deleting' ? (
+          <button
+            aria-label={`${item.document.title} 이름 변경`}
+            title="문서 이름 변경"
+            type="button"
+            onClick={() => setRenameOpen(true)}
+          >
+            <Pencil size={15} />
+          </button>
+        ) : null}
+      </div>
       <dl>
         <div><dt>형식</dt><dd>{item.document.sourceType.toUpperCase()}</dd></div>
         <div><dt>크기</dt><dd>{formatBytes(item.document.sizeBytes)}</dd></div>
@@ -517,6 +536,14 @@ function DocumentInspector({
             ) : null}
           </div>
         </>
+      ) : null}
+      {renameOpen ? (
+        <DocumentRenameDialog
+          currentName={item.document.name}
+          documentId={item.document.id}
+          onClose={() => setRenameOpen(false)}
+          onRenamed={onRenameDocument}
+        />
       ) : null}
     </aside>
   );
@@ -1641,6 +1668,39 @@ export function DocumentRagApp({
     if (draggedFolderId) void handleMoveFolder(draggedFolderId, folderId);
   }
 
+  function handleDocumentRenamed(result: RenameDocumentResponse) {
+    const renamed = result.document;
+    const documentId = renamed.document.id;
+    const title = renamed.document.title;
+    setDocuments((current) => current.map((item) => (
+      item.document.id === documentId ? renamed : item
+    )));
+    setExternalPreviewDocument((current) => (
+      current?.document.id === documentId ? renamed : current
+    ));
+    setSourcePreview((current) => current?.documentId === documentId
+      ? { ...current, documentTitle: title }
+      : current);
+    setActiveSources((current) => current.map((source) => source.documentId === documentId
+      ? { ...source, documentTitle: title }
+      : source));
+    setMessages((current) => current.map((message) => message.sources
+      ? {
+        ...message,
+        sources: message.sources.map((source) => source.documentId === documentId
+          ? { ...source, documentTitle: title }
+          : source),
+      }
+      : message));
+    updateRuleDocuments((current) => current.map((document) => document.documentId === documentId
+      ? { ...document, title, originalFilename: renamed.document.name }
+      : document));
+    void refreshRuleDocuments();
+    setDocumentActionError(result.indexStatus === 'warning' && result.warning
+      ? { documentId, message: result.warning }
+      : null);
+  }
+
   async function handleDeleteDocument(item: IndexedDocument) {
     if (deletingDocumentId) return;
     const isRetry = item.status === 'deleting';
@@ -1964,7 +2024,7 @@ export function DocumentRagApp({
                           <button key={`${source.retrievalRole ?? 'seed'}:${source.chunkId}`} type="button" onClick={() => void openSource(source)}>
                             <span>{index + 1}</span>
                             <small className={`retrieval-role-badge ${source.retrievalRole ?? 'seed'}`}>
-                              {retrievalRoleLabel(source.retrievalRole)}
+                              {retrievalRoleLabel(source.retrievalRole, source.expansionKind)}
                             </small>
                             {source.documentTitle}
                             <ChevronRight size={14} />
@@ -2535,6 +2595,7 @@ export function DocumentRagApp({
                   frameName={DOCUMENT_PREVIEW_FRAME_NAME}
                   onClose={closeDocumentInspector}
                   onMoveDocument={handleMoveDocument}
+                  onRenameDocument={handleDocumentRenamed}
                   onDeleteDocument={handleDeleteDocument}
                   onExpandStructure={setExpandedStructureChunkId}
                 />
@@ -3048,6 +3109,7 @@ export function DocumentRagApp({
               }
               frameName={SOURCE_PREVIEW_FRAME_NAME}
               onMoveDocument={handleMoveDocument}
+              onRenameDocument={handleDocumentRenamed}
               onDeleteDocument={handleDeleteDocument}
               onExpandStructure={setExpandedStructureChunkId}
             />
@@ -3072,7 +3134,7 @@ export function DocumentRagApp({
                   <div className="source-number">{index + 1}</div>
                   <div>
                     <span className={`retrieval-role-badge ${source.retrievalRole ?? 'seed'}`}>
-                      {retrievalRoleLabel(source.retrievalRole)}
+                      {retrievalRoleLabel(source.retrievalRole, source.expansionKind)}
                     </span>
                     <span className="source-score">{Math.round(source.score * 100)}% match</span>
                     <strong>{source.documentTitle}</strong>

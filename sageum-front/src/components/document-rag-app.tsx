@@ -28,6 +28,7 @@ import {
   MessageSquareText,
   Network,
   Paperclip,
+  PanelLeftClose,
   Pencil,
   Search,
   Send,
@@ -43,6 +44,7 @@ import {
   type FormEvent,
   type DragEvent,
   type KeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
   useCallback,
   useEffect,
@@ -61,6 +63,13 @@ import {
   deleteRepositoryItems,
   deleteStoredDocument,
 } from '@/lib/documents/browser-delete';
+import {
+  DOCUMENT_STRUCTURE_PANE_DEFAULT_WIDTH,
+  DOCUMENT_STRUCTURE_PANE_MIN_WIDTH,
+  documentStructurePaneWidthBounds,
+  isDocumentComparisonNarrow,
+  resolveDocumentStructurePaneWidth,
+} from '@/lib/documents/inspector-layout';
 import {
   fetchDocumentIngestionJob,
   reuploadAndProcessDocument,
@@ -125,6 +134,10 @@ type InspectorResizeStart = {
   width: number;
   maxWidth: number;
 };
+type ComparisonResizeStart = InspectorResizeStart & {
+  minWidth: number;
+};
+type ComparisonMobileTab = 'structure' | 'preview';
 
 type ChatMessage = {
   id: string;
@@ -194,7 +207,9 @@ const SOURCE_PREVIEW_FRAME_NAME = 'sageum-source-preview';
 const DOCUMENT_DRAG_TYPE = 'application/x-sageum-document';
 const FOLDER_DRAG_TYPE = 'application/x-sageum-folder';
 const DOCUMENT_INSPECTOR_WIDTH_KEY = 'sageum:document-inspector-width';
-const DOCUMENT_INSPECTOR_DEFAULT_WIDTH = 560;
+const DOCUMENT_STRUCTURE_PANE_WIDTH_KEY = 'sageum:document-structure-pane-width';
+const SIDEBAR_COLLAPSED_KEY = 'sageum:sidebar-collapsed';
+const DOCUMENT_INSPECTOR_DEFAULT_WIDTH = 760;
 const DOCUMENT_INSPECTOR_MIN_WIDTH = 400;
 const DOCUMENT_INSPECTOR_MAX_VIEWPORT_RATIO = 0.74;
 const UPLOAD_STEPS = ['원본 업로드', '구조 추출', '벡터 색인', '완료'] as const;
@@ -356,6 +371,128 @@ function documentPreviewUrl(documentId: string, chunk?: DocumentChunk) {
   return `${base}#block-${chunk.focusBlock}`;
 }
 
+function DocumentPreviewSection({
+  item,
+  previewChunk,
+  deletingDocumentId,
+  frameName,
+  onDeleteDocument,
+}: {
+  item: IndexedDocument;
+  previewChunk?: DocumentChunk;
+  deletingDocumentId: string | null;
+  frameName: string;
+  onDeleteDocument: (item: IndexedDocument) => void | Promise<void>;
+}) {
+  return (
+    <>
+      <div className="document-preview-heading">
+        <h3>{item.status === 'deleting' ? '삭제 대기 중' : '원본 미리보기'}</h3>
+        <div className="document-preview-actions">
+          {item.status !== 'deleting' ? (
+            <a
+              className="document-download-action"
+              href={`/api/documents/${encodeURIComponent(item.document.id)}/original?disposition=attachment`}
+            >
+              <Download size={14} />
+              다운로드
+            </a>
+          ) : null}
+          <button
+            className="document-delete-action"
+            type="button"
+            disabled={deletingDocumentId !== null}
+            onClick={() => void onDeleteDocument(item)}
+          >
+            {deletingDocumentId === item.document.id ? (
+              <LoaderCircle size={14} className="spin" />
+            ) : (
+              <Trash2 size={14} />
+            )}
+            {item.status === 'deleting' ? '삭제 재시도' : '삭제'}
+          </button>
+        </div>
+      </div>
+      {item.status === 'deleting' ? (
+        <div className="document-deletion-pending">
+          <Trash2 size={22} />
+          <strong>검색에서는 이미 제외됐습니다</strong>
+          <span>외부 리소스 정리가 실패했다면 삭제 재시도를 눌러 마무리하세요.</span>
+        </div>
+      ) : (
+        <div className="document-preview-frame">
+          <iframe
+            key={`${item.document.id}:${previewChunk?.id ?? 'default'}`}
+            name={frameName}
+            src={documentPreviewUrl(item.document.id, previewChunk)}
+            title={`${item.document.title} 원본 미리보기`}
+            sandbox={item.document.sourceType === 'pdf' ? undefined : ''}
+            referrerPolicy="no-referrer"
+          />
+        </div>
+      )}
+    </>
+  );
+}
+
+function DocumentStructureSection({
+  item,
+  expandedStructureChunkId,
+  snippetPrefix,
+  frameName,
+  onSelect,
+}: {
+  item: IndexedDocument;
+  expandedStructureChunkId: string | null;
+  snippetPrefix: string;
+  frameName: string;
+  onSelect: (chunkId: string) => void;
+}) {
+  return (
+    <>
+      <div className="structure-heading">
+        <h3>구조화 결과</h3>
+        <span>선택하면 원문 위치로 이동합니다</span>
+      </div>
+      <div className="structure-list">
+        {item.chunks.map((chunk) => {
+          const expanded = expandedStructureChunkId === chunk.id;
+          const snippetId = `${snippetPrefix}-${chunk.ordinal}`;
+          return (
+            <a
+              aria-controls={snippetId}
+              aria-expanded={expanded}
+              href={documentPreviewUrl(item.document.id, chunk)}
+              key={chunk.id}
+              onClick={() => onSelect(chunk.id)}
+              target={frameName}
+            >
+              <span>{chunk.ordinal + 1}</span>
+              <div className="structure-list-content">
+                <p>
+                  <strong>{chunk.headingPath.join(' › ') || '본문'}</strong>
+                  <small>
+                    {[chunkLocation(chunk.location), `${chunk.wordCount} words`]
+                      .filter(Boolean)
+                      .join(' · ')}
+                  </small>
+                  <small className="structure-range">{chunkRangeLabel(chunk)}</small>
+                </p>
+                {expanded ? (
+                  <p className="structure-snippet" id={snippetId}>{chunk.text}</p>
+                ) : null}
+              </div>
+            </a>
+          );
+        })}
+        {!item.chunks.length ? (
+          <p className="structure-list-empty">구조화된 본문 위치가 없습니다.</p>
+        ) : null}
+      </div>
+    </>
+  );
+}
+
 function DocumentInspector({
   item,
   folderTree,
@@ -387,6 +524,147 @@ function DocumentInspector({
   const previewChunk = item.chunks.find((chunk) => chunk.id === expandedStructureChunkId);
   const snippetPrefix = modal ? 'modal-structure-snippet' : 'structure-snippet';
   const [renameOpen, setRenameOpen] = useState(false);
+  const comparisonRef = useRef<HTMLDivElement>(null);
+  const requestedStructurePaneWidthRef = useRef(DOCUMENT_STRUCTURE_PANE_DEFAULT_WIDTH);
+  const [structurePaneWidth, setStructurePaneWidth] = useState(
+    DOCUMENT_STRUCTURE_PANE_DEFAULT_WIDTH,
+  );
+  const [structurePaneMaximum, setStructurePaneMaximum] = useState(
+    DOCUMENT_STRUCTURE_PANE_DEFAULT_WIDTH,
+  );
+  const [comparisonNarrow, setComparisonNarrow] = useState(false);
+  const [comparisonMobileTab, setComparisonMobileTab] = useState<ComparisonMobileTab>('preview');
+  const [comparisonResizeStart, setComparisonResizeStart] = useState<ComparisonResizeStart | null>(
+    null,
+  );
+  const structurePaneId = `document-structure-pane-${item.document.id}`;
+  const previewPaneId = `document-preview-pane-${item.document.id}`;
+
+  useEffect(() => {
+    setComparisonMobileTab('preview');
+  }, [item.document.id]);
+
+  useEffect(() => {
+    if (modal || item.status === 'deleting') return;
+    const comparison = comparisonRef.current;
+    if (!comparison) return;
+    const savedWidth = Number.parseInt(
+      window.localStorage.getItem(DOCUMENT_STRUCTURE_PANE_WIDTH_KEY) ?? '',
+      10,
+    );
+    requestedStructurePaneWidthRef.current = Number.isFinite(savedWidth)
+      ? savedWidth
+      : DOCUMENT_STRUCTURE_PANE_DEFAULT_WIDTH;
+    const updateWidth = (width: number) => {
+      const { maximum } = documentStructurePaneWidthBounds(width);
+      setComparisonNarrow(isDocumentComparisonNarrow(width));
+      setStructurePaneMaximum(maximum);
+      setStructurePaneWidth(resolveDocumentStructurePaneWidth(
+        width,
+        requestedStructurePaneWidthRef.current,
+      ));
+    };
+    updateWidth(comparison.getBoundingClientRect().width);
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (entry) updateWidth(entry.contentRect.width);
+    });
+    observer.observe(comparison);
+    return () => observer.disconnect();
+  }, [item.status, modal]);
+
+  useEffect(() => {
+    if (!comparisonResizeStart) return;
+    document.body.classList.add('resizing-document-comparison');
+    return () => document.body.classList.remove('resizing-document-comparison');
+  }, [comparisonResizeStart]);
+
+  function comparisonWidthBounds() {
+    const width = comparisonRef.current?.getBoundingClientRect().width ?? 0;
+    return documentStructurePaneWidthBounds(width);
+  }
+
+  function comparisonWidthFromPointer(clientX: number, start: ComparisonResizeStart) {
+    return clamp(
+      start.width + clientX - start.clientX,
+      start.minWidth,
+      start.maxWidth,
+    );
+  }
+
+  function handleComparisonResizeStart(event: ReactPointerEvent<HTMLDivElement>) {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    const { minimum, maximum } = comparisonWidthBounds();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setComparisonResizeStart({
+      pointerId: event.pointerId,
+      clientX: event.clientX,
+      width: structurePaneWidth,
+      minWidth: minimum,
+      maxWidth: maximum,
+    });
+  }
+
+  function handleComparisonResizeMove(event: ReactPointerEvent<HTMLDivElement>) {
+    if (!comparisonResizeStart || event.pointerId !== comparisonResizeStart.pointerId) return;
+    const nextWidth = comparisonWidthFromPointer(event.clientX, comparisonResizeStart);
+    requestedStructurePaneWidthRef.current = nextWidth;
+    setStructurePaneWidth(nextWidth);
+  }
+
+  function handleComparisonResizeEnd(event: ReactPointerEvent<HTMLDivElement>) {
+    if (!comparisonResizeStart || event.pointerId !== comparisonResizeStart.pointerId) return;
+    const nextWidth = comparisonWidthFromPointer(event.clientX, comparisonResizeStart);
+    requestedStructurePaneWidthRef.current = nextWidth;
+    setStructurePaneWidth(nextWidth);
+    setComparisonResizeStart(null);
+    window.localStorage.setItem(DOCUMENT_STRUCTURE_PANE_WIDTH_KEY, String(nextWidth));
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  }
+
+  function handleComparisonResizeCancel(event: ReactPointerEvent<HTMLDivElement>) {
+    if (!comparisonResizeStart || event.pointerId !== comparisonResizeStart.pointerId) return;
+    requestedStructurePaneWidthRef.current = comparisonResizeStart.width;
+    setStructurePaneWidth(comparisonResizeStart.width);
+    setComparisonResizeStart(null);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  }
+
+  function resetComparisonWidth() {
+    const comparisonWidth = comparisonRef.current?.getBoundingClientRect().width ?? 0;
+    const nextWidth = resolveDocumentStructurePaneWidth(
+      comparisonWidth,
+      DOCUMENT_STRUCTURE_PANE_DEFAULT_WIDTH,
+    );
+    requestedStructurePaneWidthRef.current = nextWidth;
+    setStructurePaneWidth(nextWidth);
+    window.localStorage.setItem(DOCUMENT_STRUCTURE_PANE_WIDTH_KEY, String(nextWidth));
+  }
+
+  function handleComparisonResizeKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    const { minimum, maximum } = comparisonWidthBounds();
+    let nextWidth = structurePaneWidth;
+    if (event.key === 'ArrowLeft') nextWidth -= 24;
+    else if (event.key === 'ArrowRight') nextWidth += 24;
+    else if (event.key === 'Home') nextWidth = minimum;
+    else if (event.key === 'End') nextWidth = maximum;
+    else return;
+    event.preventDefault();
+    nextWidth = clamp(nextWidth, minimum, maximum);
+    requestedStructurePaneWidthRef.current = nextWidth;
+    setStructurePaneWidth(nextWidth);
+    window.localStorage.setItem(DOCUMENT_STRUCTURE_PANE_WIDTH_KEY, String(nextWidth));
+  }
+
+  function handleStructureSelect(chunkId: string) {
+    onExpandStructure(chunkId);
+    if (comparisonNarrow) setComparisonMobileTab('preview');
+  }
 
   return (
     <aside className={`document-inspector${modal ? ' document-inspector-modal' : ''}`}>
@@ -401,142 +679,162 @@ function DocumentInspector({
           <X size={19} />
         </button>
       ) : null}
-      <span className={`large-file-icon ${item.document.sourceType}`}>
-        <DocumentIcon size={28} />
-      </span>
-      <span className="eyebrow">DOCUMENT DETAIL</span>
-      <div className="document-inspector-title">
-        <h2>{item.document.title}</h2>
-        {item.status !== 'deleting' ? (
-          <button
-            aria-label={`${item.document.title} 이름 변경`}
-            title="문서 이름 변경"
-            type="button"
-            onClick={() => setRenameOpen(true)}
+      <div className="document-inspector-summary">
+        <span className={`large-file-icon ${item.document.sourceType}`}>
+          <DocumentIcon size={28} />
+        </span>
+        <span className="eyebrow">DOCUMENT DETAIL</span>
+        <div className="document-inspector-title">
+          <h2>{item.document.title}</h2>
+          {item.status !== 'deleting' ? (
+            <button
+              aria-label={`${item.document.title} 이름 변경`}
+              title="문서 이름 변경"
+              type="button"
+              onClick={() => setRenameOpen(true)}
+            >
+              <Pencil size={15} />
+            </button>
+          ) : null}
+        </div>
+        <dl>
+          <div><dt>형식</dt><dd>{item.document.sourceType.toUpperCase()}</dd></div>
+          <div><dt>크기</dt><dd>{formatBytes(item.document.sizeBytes)}</dd></div>
+          <div><dt>청크</dt><dd>{item.chunks.length}</dd></div>
+          <div><dt>인덱싱</dt><dd>{formatDate(item.indexedAt)}</dd></div>
+        </dl>
+        <label className="document-folder-select">
+          <span><FolderInput size={14} /> 저장 위치</span>
+          <select
+            aria-label="문서 이동 폴더"
+            value={item.document.folderId ?? ''}
+            onChange={(event) => void onMoveDocument(
+              item.document.id,
+              event.target.value || null,
+            )}
           >
-            <Pencil size={15} />
-          </button>
+            <option value="">내 문서</option>
+            {folderTree.map((folder) => (
+              <option key={folder.id} value={folder.id}>
+                {`${'　'.repeat(folder.depth)}${folder.name}`}
+              </option>
+            ))}
+          </select>
+          <ChevronDown size={13} />
+        </label>
+        {documentActionError ? (
+          <p className="document-action-error" role="alert">{documentActionError}</p>
         ) : null}
       </div>
-      <dl>
-        <div><dt>형식</dt><dd>{item.document.sourceType.toUpperCase()}</dd></div>
-        <div><dt>크기</dt><dd>{formatBytes(item.document.sizeBytes)}</dd></div>
-        <div><dt>청크</dt><dd>{item.chunks.length}</dd></div>
-        <div><dt>인덱싱</dt><dd>{formatDate(item.indexedAt)}</dd></div>
-      </dl>
-      <label className="document-folder-select">
-        <span><FolderInput size={14} /> 저장 위치</span>
-        <select
-          aria-label="문서 이동 폴더"
-          value={item.document.folderId ?? ''}
-          onChange={(event) => void onMoveDocument(
-            item.document.id,
-            event.target.value || null,
-          )}
-        >
-          <option value="">내 문서</option>
-          {folderTree.map((folder) => (
-            <option key={folder.id} value={folder.id}>
-              {`${'　'.repeat(folder.depth)}${folder.name}`}
-            </option>
-          ))}
-        </select>
-        <ChevronDown size={13} />
-      </label>
-      {documentActionError ? (
-        <p className="document-action-error" role="alert">{documentActionError}</p>
-      ) : null}
-      <div className="document-preview-sticky">
-        <div className="document-preview-heading">
-          <h3>{item.status === 'deleting' ? '삭제 대기 중' : '원본 미리보기'}</h3>
-          <div className="document-preview-actions">
-            {item.status !== 'deleting' ? (
-              <a
-                className="document-download-action"
-                href={`/api/documents/${encodeURIComponent(item.document.id)}/original?disposition=attachment`}
-              >
-                <Download size={14} />
-                다운로드
-              </a>
-            ) : null}
-            <button
-              className="document-delete-action"
-              type="button"
-              disabled={deletingDocumentId !== null}
-              onClick={() => void onDeleteDocument(item)}
-            >
-              {deletingDocumentId === item.document.id ? (
-                <LoaderCircle size={14} className="spin" />
-              ) : (
-                <Trash2 size={14} />
-              )}
-              {item.status === 'deleting' ? '삭제 재시도' : '삭제'}
-            </button>
-          </div>
-        </div>
-        {item.status === 'deleting' ? (
-          <div className="document-deletion-pending">
-            <Trash2 size={22} />
-            <strong>검색에서는 이미 제외됐습니다</strong>
-            <span>외부 리소스 정리가 실패했다면 삭제 재시도를 눌러 마무리하세요.</span>
-          </div>
-        ) : (
-          <div className="document-preview-frame">
-            <iframe
-              key={`${item.document.id}:${previewChunk?.id ?? 'default'}`}
-              name={frameName}
-              src={documentPreviewUrl(item.document.id, previewChunk)}
-              title={`${item.document.title} 원본 미리보기`}
-              sandbox={item.document.sourceType === 'pdf' ? undefined : ''}
-              referrerPolicy="no-referrer"
+      {modal || item.status === 'deleting' ? (
+        <>
+          <div className="document-preview-sticky">
+            <DocumentPreviewSection
+              item={item}
+              previewChunk={previewChunk}
+              deletingDocumentId={deletingDocumentId}
+              frameName={frameName}
+              onDeleteDocument={onDeleteDocument}
             />
           </div>
-        )}
-      </div>
-      {item.status !== 'deleting' ? (
+          {item.status !== 'deleting' ? (
+            <>
+              <div className="inspector-rule" />
+              <DocumentStructureSection
+                item={item}
+                expandedStructureChunkId={expandedStructureChunkId}
+                snippetPrefix={snippetPrefix}
+                frameName={frameName}
+                onSelect={onExpandStructure}
+              />
+            </>
+          ) : null}
+        </>
+      ) : (
         <>
-          <div className="inspector-rule" />
-          <div className="structure-heading">
-            <h3>구조화 결과</h3>
-            <span>선택하면 원문 위치로 이동합니다</span>
-          </div>
-          <div className="structure-list">
-            {item.chunks.map((chunk) => {
-              const expanded = expandedStructureChunkId === chunk.id;
-              const snippetId = `${snippetPrefix}-${chunk.ordinal}`;
-              return (
-                <a
-                  aria-controls={snippetId}
-                  aria-expanded={expanded}
-                  href={documentPreviewUrl(item.document.id, chunk)}
-                  key={chunk.id}
-                  onClick={() => onExpandStructure(chunk.id)}
-                  target={frameName}
-                >
-                  <span>{chunk.ordinal + 1}</span>
-                  <div className="structure-list-content">
-                    <p>
-                      <strong>{chunk.headingPath.join(' › ') || '본문'}</strong>
-                      <small>
-                        {[chunkLocation(chunk.location), `${chunk.wordCount} words`]
-                          .filter(Boolean)
-                          .join(' · ')}
-                      </small>
-                      <small className="structure-range">{chunkRangeLabel(chunk)}</small>
-                    </p>
-                    {expanded ? (
-                      <p className="structure-snippet" id={snippetId}>{chunk.text}</p>
-                    ) : null}
-                  </div>
-                </a>
-              );
-            })}
-            {!item.chunks.length ? (
-              <p className="structure-list-empty">구조화된 본문 위치가 없습니다.</p>
+          {comparisonNarrow ? (
+            <div aria-label="문서 비교 화면" className="document-comparison-tabs" role="tablist">
+              <button
+                aria-controls={structurePaneId}
+                aria-selected={comparisonMobileTab === 'structure'}
+                id={`${structurePaneId}-tab`}
+                role="tab"
+                type="button"
+                onClick={() => setComparisonMobileTab('structure')}
+              >
+                구조화 결과
+              </button>
+              <button
+                aria-controls={previewPaneId}
+                aria-selected={comparisonMobileTab === 'preview'}
+                id={`${previewPaneId}-tab`}
+                role="tab"
+                type="button"
+                onClick={() => setComparisonMobileTab('preview')}
+              >
+                원본 미리보기
+              </button>
+            </div>
+          ) : null}
+          <div
+            className={`document-comparison${comparisonNarrow ? ' narrow' : ''}`}
+            ref={comparisonRef}
+            style={{
+              '--document-structure-pane-width': `${structurePaneWidth}px`,
+            } as CSSProperties}
+          >
+            <section
+              aria-labelledby={comparisonNarrow ? `${structurePaneId}-tab` : undefined}
+              className="document-comparison-structure"
+              hidden={comparisonNarrow && comparisonMobileTab !== 'structure'}
+              id={structurePaneId}
+              role={comparisonNarrow ? 'tabpanel' : undefined}
+            >
+              <DocumentStructureSection
+                item={item}
+                expandedStructureChunkId={expandedStructureChunkId}
+                snippetPrefix={snippetPrefix}
+                frameName={frameName}
+                onSelect={handleStructureSelect}
+              />
+            </section>
+            {!comparisonNarrow ? (
+              <div
+                aria-label="구조화 결과 영역 너비 조절"
+                aria-orientation="vertical"
+                aria-valuemax={Math.round(structurePaneMaximum)}
+                aria-valuemin={DOCUMENT_STRUCTURE_PANE_MIN_WIDTH}
+                aria-valuenow={Math.round(structurePaneWidth)}
+                className="document-comparison-resizer"
+                role="separator"
+                tabIndex={0}
+                title="드래그하거나 방향키로 크기를 조절합니다. 더블 클릭하면 초기화됩니다."
+                onDoubleClick={resetComparisonWidth}
+                onKeyDown={handleComparisonResizeKeyDown}
+                onPointerCancel={handleComparisonResizeCancel}
+                onPointerDown={handleComparisonResizeStart}
+                onPointerMove={handleComparisonResizeMove}
+                onPointerUp={handleComparisonResizeEnd}
+              />
             ) : null}
+            <section
+              aria-labelledby={comparisonNarrow ? `${previewPaneId}-tab` : undefined}
+              className="document-comparison-preview"
+              hidden={comparisonNarrow && comparisonMobileTab !== 'preview'}
+              id={previewPaneId}
+              role={comparisonNarrow ? 'tabpanel' : undefined}
+            >
+              <DocumentPreviewSection
+                item={item}
+                previewChunk={previewChunk}
+                deletingDocumentId={deletingDocumentId}
+                frameName={frameName}
+                onDeleteDocument={onDeleteDocument}
+              />
+            </section>
           </div>
         </>
-      ) : null}
+      )}
       {renameOpen ? (
         <DocumentRenameDialog
           currentName={item.document.name}
@@ -570,6 +868,8 @@ export function DocumentRagApp({
 }) {
   const [view, setView] = useState<View>('chat');
   const [documentViewMode, setDocumentViewMode] = useState<DocumentViewMode>('list');
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarPreferenceReady, setSidebarPreferenceReady] = useState(false);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [oauthConnectionsModalOpen, setOAuthConnectionsModalOpen] = useState(false);
   const [documents, setDocuments] = useState<IndexedDocument[]>(() => initialDocuments);
@@ -665,6 +965,11 @@ export function DocumentRagApp({
   const closeOAuthConnectionsModal = useCallback(() => {
     setOAuthConnectionsModalOpen(false);
     window.requestAnimationFrame(() => profileMenuTriggerRef.current?.focus());
+  }, []);
+
+  useEffect(() => {
+    setSidebarCollapsed(window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === 'true');
+    setSidebarPreferenceReady(true);
   }, []);
 
   useEffect(() => {
@@ -1869,42 +2174,114 @@ export function DocumentRagApp({
     setSelectedDocumentId(documentId);
   }
 
+  function setSidebarCollapsedPreference(collapsed: boolean) {
+    setProfileMenuOpen(false);
+    setSidebarCollapsed(collapsed);
+    window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(collapsed));
+  }
+
+  function handleSidebarBackgroundClick(event: ReactMouseEvent<HTMLElement>) {
+    if (!sidebarCollapsed || event.target !== event.currentTarget) return;
+    setSidebarCollapsedPreference(false);
+  }
+
   return (
-    <div className="rag-shell">
-      <aside className="rag-sidebar">
-        <button className="rag-brand" type="button" onClick={() => setView('chat')}>
-          <SageumMark />
-          <span>
-            <strong>SAGEUM</strong>
-            <small>DOCUMENT INTELLIGENCE</small>
-          </span>
-        </button>
+    <div
+      className={`rag-shell${sidebarCollapsed ? ' sidebar-collapsed' : ''}${
+        sidebarPreferenceReady ? ' sidebar-preference-ready' : ''
+      }`}
+    >
+      <aside
+        className="rag-sidebar"
+        id="sageum-primary-sidebar"
+        onClick={handleSidebarBackgroundClick}
+      >
+        <div className="rag-sidebar-header">
+          <button
+            aria-label={sidebarCollapsed ? '사이드바 펼치기' : 'Sageum 홈'}
+            className="rag-brand"
+            title={sidebarCollapsed ? '사이드바 펼치기' : undefined}
+            type="button"
+            onClick={() => {
+              if (sidebarCollapsed) {
+                setSidebarCollapsedPreference(false);
+                return;
+              }
+              setView('chat');
+            }}
+          >
+            <SageumMark />
+            <span>
+              <strong>SAGEUM</strong>
+              <small>DOCUMENT INTELLIGENCE</small>
+            </span>
+          </button>
+          {!sidebarCollapsed ? (
+            <button
+              aria-controls="sageum-primary-sidebar"
+              aria-expanded={true}
+              aria-label="사이드바 접기"
+              className="rag-sidebar-toggle"
+              title="사이드바 접기"
+              type="button"
+              onClick={() => setSidebarCollapsedPreference(true)}
+            >
+              <PanelLeftClose size={16} />
+            </button>
+          ) : null}
+        </div>
 
         <nav className="rag-nav" aria-label="주요 메뉴">
-          <button className={view === 'chat' ? 'active' : ''} type="button" onClick={() => setView('chat')}>
+          <button
+            aria-label="문서에게 질문"
+            className={view === 'chat' ? 'active' : ''}
+            data-tooltip="문서에게 질문"
+            type="button"
+            onClick={() => setView('chat')}
+          >
             <MessageSquareText size={18} />
-            문서에게 질문
-          </button>
-          <button className={view === 'documents' ? 'active' : ''} type="button" onClick={() => setView('documents')}>
-            <Library size={18} />
-            문서 저장소
-            <span className="nav-count">{documents.length}</span>
-          </button>
-          <button className={view === 'rules' ? 'active' : ''} type="button" onClick={() => setView('rules')}>
-            <Network size={18} />
-            비즈니스 규칙
-          </button>
-          <button className={view === 'upload' ? 'active' : ''} type="button" onClick={() => setView('upload')}>
-            <HardDriveUpload size={18} />
-            문서 추가
+            <span className="rag-nav-label">문서에게 질문</span>
           </button>
           <button
+            aria-label="문서 저장소"
+            className={view === 'documents' ? 'active' : ''}
+            data-tooltip="문서 저장소"
+            type="button"
+            onClick={() => setView('documents')}
+          >
+            <Library size={18} />
+            <span className="rag-nav-label">문서 저장소</span>
+            <span className="nav-count">{documents.length}</span>
+          </button>
+          <button
+            aria-label="비즈니스 규칙"
+            className={view === 'rules' ? 'active' : ''}
+            data-tooltip="비즈니스 규칙"
+            type="button"
+            onClick={() => setView('rules')}
+          >
+            <Network size={18} />
+            <span className="rag-nav-label">비즈니스 규칙</span>
+          </button>
+          <button
+            aria-label="문서 추가"
+            className={view === 'upload' ? 'active' : ''}
+            data-tooltip="문서 추가"
+            type="button"
+            onClick={() => setView('upload')}
+          >
+            <HardDriveUpload size={18} />
+            <span className="rag-nav-label">문서 추가</span>
+          </button>
+          <button
+            aria-label="처리 현황"
             className={view === 'upload-status' ? 'active' : ''}
+            data-tooltip="처리 현황"
             type="button"
             onClick={() => setView('upload-status')}
           >
             <ListChecks size={18} />
-            처리 현황
+            <span className="rag-nav-label">처리 현황</span>
             {uploadJobs.length ? <span className="nav-count">{uploadJobs.length}</span> : null}
           </button>
         </nav>

@@ -382,8 +382,8 @@ export function BusinessRulesView({
       </header>
       <div className="business-rules-content">
         <div className="business-rules-intro">
-          <strong>문서 관계를 사람이 정의하고 Sageum이 자동으로 연결합니다.</strong>
-          <span>규칙 문장 전체와 의미가 유사한 문서 청크를 연결해 검색과 그래프에 반영합니다.</span>
+          <strong>일반 문서만으로 파악하기 어려운 비즈니스 정책과 내부 맥락을 등록해 주세요.</strong>
+          <span>업무 규칙·예외·조직의 암묵지를 등록하면 Sageum이 관련 문서와 규칙을 찾아 검색과 그래프에 반영합니다.</span>
         </div>
         {message ? <p className="rule-message" role="status">{message}</p> : null}
         <input
@@ -544,8 +544,8 @@ export function BusinessRulesView({
           {!ruleDocuments.length && !uploading ? (
             <div className="rule-empty">
               <FileText size={30} />
-              <strong>아직 비즈니스 규칙 문서가 없습니다.</strong>
-              <span>규칙을 직접 입력하거나 정책 문서를 업로드하면 일반 문서 사이의 연결을 자동으로 찾습니다.</span>
+              <strong>아직 등록된 비즈니스 규칙이 없습니다.</strong>
+              <span>문서에 드러나지 않는 정책·예외·내부 맥락을 직접 입력하거나 규칙 문서로 업로드해 주세요.</span>
             </div>
           ) : null}
         </div>
@@ -602,21 +602,21 @@ export function BusinessRulesView({
                 <X size={20} />
               </button>
             </header>
-            <p>문서 사이의 연결 기준으로 사용할 자연어 규칙을 한 번에 하나씩 입력해 주세요.</p>
+            <p>일반 문서만으로 파악하기 어려운 정책·예외·내부 맥락을 자연어 규칙으로 한 번에 하나씩 입력해 주세요.</p>
             <label htmlFor="manual-rule-content">규칙 내용</label>
             <textarea
               id="manual-rule-content"
               ref={manualTextareaRef}
               value={manualModal.content}
               maxLength={MAX_MANUAL_RULE_CHARACTERS}
-              placeholder="예: 정글러는 갱킹을 잘해야 한다."
+              placeholder="예: 프리미엄 고객의 환불 요청은 우선 검토한다."
               disabled={savingManual}
               onChange={(event) => setManualModal((current) => current
                 ? { ...current, content: event.target.value }
                 : current)}
             />
             <div className="manual-rule-count">
-              <span>규칙 전체를 임베딩하고 의미가 유사한 일반 문서 청크를 자동으로 연결합니다.</span>
+              <span>입력한 규칙 전체를 임베딩해 관련 문서와 다른 규칙을 의미 기반으로 연결합니다.</span>
               <strong>{manualModal.content.length.toLocaleString()} / {MAX_MANUAL_RULE_CHARACTERS.toLocaleString()}</strong>
             </div>
             {manualError ? <p className="manual-rule-error" role="alert">{manualError}</p> : null}

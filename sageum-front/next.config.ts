@@ -7,6 +7,7 @@ const appRoot = dirname(fileURLToPath(import.meta.url));
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
+  devIndicators: false,
   serverExternalPackages: ['@dagrejs/dagre', '@dagrejs/graphlib'],
   turbopack: { root: appRoot },
 };

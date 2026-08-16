@@ -180,7 +180,12 @@ svg {
   line-height: 1.03;
 }
 
-.auth-title-nowrap {
+.auth-story-copy h1.auth-brand-title {
+  font-size: clamp(30px, 4vw, 52px);
+}
+
+.auth-title-line {
+  display: block;
   white-space: nowrap;
 }
 

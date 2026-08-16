@@ -1,4 +1,4 @@
-import { BookOpenText, Database, ShieldCheck } from 'lucide-react';
+import { BookOpenText, Network, ShieldCheck } from 'lucide-react';
 import { redirect } from 'next/navigation';
 import { safeRedirectPath } from '@/lib/auth/redirect';
 import { createClient } from '@/lib/supabase/server';
@@ -34,17 +34,18 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
         </div>
 
         <div className="auth-story-copy">
-          <span className="eyebrow">PRIVATE KNOWLEDGE, GROUNDED ANSWERS</span>
-          <h1 id="auth-title">
-            사내 문서를<br />대화 가능한 <span className="auth-title-nowrap">지식으로.</span>
+          <span className="eyebrow">SCATTERED DOCUMENTS, CONNECTED KNOWLEDGE</span>
+          <h1 className="auth-brand-title" id="auth-title">
+            <span className="auth-title-line">흩어진 문서를 모아,</span>
+            <span className="auth-title-line">가치 있는 지식으로.</span>
           </h1>
-          <p>문서를 안전하게 저장하고, 답변과 원문 근거를 한 화면에서 확인하는 개인용 RAG 저장소입니다.</p>
+          <p>모래 속 사금처럼 곳곳에 흩어진 문서를 모아 의미로 연결하고, 질문하면 원문 근거와 함께 답하는 개인용 RAG 저장소입니다.</p>
         </div>
 
         <div className="auth-features">
-          <span><BookOpenText size={18} /> 다양한 문서 구조화</span>
-          <span><Database size={18} /> 단어 단위 검색 청크</span>
-          <span><ShieldCheck size={18} /> 사용자별 비공개 저장소</span>
+          <span><BookOpenText size={18} /> 흩어진 문서 수집·구조화</span>
+          <span><Network size={18} /> 의미 기반 지식 연결</span>
+          <span><ShieldCheck size={18} /> 근거가 확인되는 답변</span>
         </div>
       </section>
 

@@ -6097,7 +6097,7 @@ body.resizing-document-comparison * {
     position: sticky;
     top: 0;
     display: grid;
-    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-columns: auto minmax(0, 1fr) auto;
     align-items: center;
     height: auto;
     padding: 9px 12px;
@@ -6148,8 +6148,55 @@ body.resizing-document-comparison * {
     font-size: 11px;
   }
 
-  .nav-count,
+  .nav-count {
+    display: none;
+  }
+
   .rag-profile {
+    display: block;
+    justify-self: end;
+    margin: 0;
+    padding: 0;
+    border-top: 0;
+  }
+
+  .rag-profile-trigger,
+  .sidebar-collapsed .rag-profile-trigger {
+    display: grid;
+    grid-template-columns: 1fr;
+    width: 38px;
+    height: 38px;
+    padding: 2px;
+    place-items: center;
+    border-color: var(--line-strong);
+    border-radius: 50%;
+    background: rgb(255 255 255 / 64%);
+  }
+
+  .rag-profile-trigger .rag-avatar {
+    width: 32px;
+    height: 32px;
+  }
+
+  .rag-profile-copy,
+  .rag-profile-chevron {
+    display: none;
+  }
+
+  .rag-profile-popover,
+  .sidebar-collapsed .rag-profile-popover {
+    top: calc(100% + 8px);
+    right: 0;
+    bottom: auto;
+    left: auto;
+    z-index: 80;
+    width: min(300px, calc(100vw - 24px));
+    max-height: calc(100dvh - 72px);
+    overflow-y: auto;
+  }
+
+  .rag-profile-popover::after,
+  .sidebar-collapsed .rag-profile-popover::after {
     display: none;
   }
 

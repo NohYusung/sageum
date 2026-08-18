@@ -2406,6 +2406,7 @@ export function DocumentRagApp({
 
           <button
             ref={profileMenuTriggerRef}
+            aria-label="프로필 메뉴"
             className="rag-profile-trigger"
             type="button"
             aria-haspopup="dialog"

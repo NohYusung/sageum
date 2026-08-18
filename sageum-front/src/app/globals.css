@@ -1973,6 +1973,86 @@ svg {
   white-space: pre-wrap;
 }
 
+.search-progress-card {
+  padding: 15px 16px 16px;
+  border: 1px solid #cad8d0;
+  border-radius: 4px 14px 14px;
+  background: linear-gradient(145deg, var(--surface), var(--sage-pale));
+  box-shadow: var(--shadow-small);
+}
+
+.search-progress-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.search-progress-head strong {
+  color: var(--sage-dark);
+  font-size: 13px;
+}
+
+.search-progress-head > span {
+  flex: none;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 9px;
+}
+
+.search-progress-card > p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.search-progress-steps {
+  display: grid;
+  gap: 7px;
+  margin: 14px 0 0;
+  padding: 13px 0 0;
+  border-top: 1px solid var(--line);
+  list-style: none;
+}
+
+.search-progress-steps li {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 18px;
+  color: var(--faint);
+  font-size: 10px;
+  transition: color 120ms ease;
+}
+
+.search-progress-icon {
+  display: grid;
+  width: 17px;
+  height: 17px;
+  place-items: center;
+  border: 1px solid #cbd2ce;
+  border-radius: 50%;
+  color: var(--faint);
+}
+
+.search-progress-steps li.done {
+  color: var(--sage);
+}
+
+.search-progress-steps li.done .search-progress-icon,
+.search-progress-steps li.active .search-progress-icon {
+  border-color: transparent;
+}
+
+.search-progress-steps li.active {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.search-progress-steps li.active .search-progress-icon {
+  color: var(--amber);
+}
+
 .message.user .message-content > p {
   border-color: var(--sage-dark);
   border-radius: 14px 4px 14px 14px;

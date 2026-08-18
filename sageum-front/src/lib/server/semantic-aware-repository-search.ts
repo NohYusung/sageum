@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import type { SearchProgressEvent } from '@/lib/documents/contracts';
 import { descendantFolderIds } from '@/lib/folders/tree';
 import type {
   AppliedRuleReference,
@@ -25,6 +26,7 @@ export type SemanticAwareSearchInput = {
   folderId?: string;
   documentIds?: string[];
   topK?: number;
+  onProgress?: (event: SearchProgressEvent) => void;
 };
 
 type SemanticSearchPath = {
@@ -389,9 +391,20 @@ export async function searchUnifiedSemanticRepository(
   const vectorStore = getQdrantVectorStore();
   const relationStore = getQdrantRelationVectorStore();
   await vectorStore.ensureCollection(configuration.embedding.dimensions);
+  input.onProgress?.({
+    type: 'progress',
+    stage: 'retrieving',
+    message: '문서와 비즈니스 규칙을 검색하고 있습니다.',
+  });
   const scope = await resolveScope(input);
   const explicitScope = Boolean(input.folderId || input.documentIds?.length);
   if (explicitScope && !scope.length) {
+    input.onProgress?.({
+      type: 'progress',
+      stage: 'expanding',
+      message: '선택한 범위의 검색 결과를 정리하고 있습니다.',
+      detail: '검색 범위에 활성 문서가 없습니다.',
+    });
     return { evidence: [], appliedRules: [], appliedSemanticLinks: [], relationMode: 'content-only' };
   }
   const latestByDocument = await activeDocuments(input.supabase, input.ownerId, scope, explicitScope);
@@ -420,6 +433,12 @@ export async function searchUnifiedSemanticRepository(
   const seedSources = seeds.map((result) => sourceFromVector(result, 'seed'));
   if (ruleSearch.status === 'rejected') {
     console.error('Hybrid rule search fell back to content search', ruleSearch.reason);
+    input.onProgress?.({
+      type: 'progress',
+      stage: 'expanding',
+      message: '직접 문서 근거로 답변을 준비하고 있습니다.',
+      detail: `문서 후보 ${seedSources.length}개`,
+    });
     return { evidence: seedSources, appliedRules: [], appliedSemanticLinks: [], relationMode: 'fallback' };
   }
 
@@ -438,6 +457,12 @@ export async function searchUnifiedSemanticRepository(
     );
   } catch (error) {
     console.error('Active hybrid rules could not be loaded', error);
+    input.onProgress?.({
+      type: 'progress',
+      stage: 'expanding',
+      message: '직접 문서 근거로 답변을 준비하고 있습니다.',
+      detail: `문서 후보 ${seedSources.length}개`,
+    });
     return { evidence: seedSources, appliedRules: [], appliedSemanticLinks: [], relationMode: 'fallback' };
   }
 
@@ -448,6 +473,13 @@ export async function searchUnifiedSemanticRepository(
   } catch (error) {
     console.error('Standalone rule evidence could not be loaded', error);
   }
+
+  input.onProgress?.({
+    type: 'progress',
+    stage: 'expanding',
+    message: '의미 연결과 추가 근거를 확인하고 있습니다.',
+    detail: `문서 후보 ${seedSources.length}개 · 규칙 후보 ${rootRules.length}개`,
+  });
 
   try {
     const [nodesResult, linksResult] = await Promise.all([
@@ -489,6 +521,14 @@ export async function searchUnifiedSemanticRepository(
       rulesById,
       new Set(latestByDocument.keys()),
     );
+    input.onProgress?.({
+      type: 'progress',
+      stage: 'expanding',
+      message: paths.length
+        ? '연결된 문서 안에서 질문 근거를 다시 검색하고 있습니다.'
+        : '직접 근거로 답변을 준비하고 있습니다.',
+      detail: paths.length ? `의미 경로 ${paths.length}개` : '추가 의미 경로가 없습니다.',
+    });
     const pathSearches = await Promise.allSettled(paths.map(async (path) => {
       const context = path.rules.map((rule) => rule.statement).join('\n');
       const results = await vectorStore.query(input.query, input.ownerId, {

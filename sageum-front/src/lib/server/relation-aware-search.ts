@@ -4,6 +4,7 @@ import type {
   AppliedRuleReference,
   RelationAwareSearchResult,
 } from '@/lib/relations/types';
+import type { SearchProgressEvent } from '@/lib/documents/contracts';
 import type { SourceReference } from '@/lib/rag/local-search';
 import type { Database } from '@/lib/supabase/database.types';
 import { getProviderConfiguration } from './env';
@@ -20,6 +21,7 @@ export type RelationAwareSearchInput = {
   folderId?: string;
   documentIds?: string[];
   topK?: number;
+  onProgress?: (event: SearchProgressEvent) => void;
 };
 
 export type StoredRule = {

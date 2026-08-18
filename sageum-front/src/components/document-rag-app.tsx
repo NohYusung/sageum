@@ -84,6 +84,11 @@ import {
   type DocumentSort,
 } from '@/lib/documents/repository-sort';
 import {
+  SEARCH_PROGRESS_PRESENTATION,
+  isSearchProgressForward,
+  searchRepository,
+} from '@/lib/documents/browser-search';
+import {
   createFolder,
   moveDocumentToFolder,
   moveFolder,
@@ -105,17 +110,15 @@ import {
 } from '@/lib/folders/folder-upload';
 import type { Folder as RepositoryFolder } from '@/lib/folders/types';
 import type {
-  ApiErrorResponse,
   DocumentIngestionJob,
   DocumentIngestionStatus,
   RenameDocumentResponse,
-  SearchDocumentsResponse,
+  SearchProgressEvent,
+  SearchProgressStage,
 } from '@/lib/documents/contracts';
 import { canResumeDocumentIngestion } from '@/lib/documents/ingestion-jobs';
 import { shouldSubmitChatOnEnter } from '@/lib/rag/chat-keyboard';
 import {
-  composeExtractiveAnswer,
-  searchDocuments,
   type IndexedDocument,
   type SourceReference,
 } from '@/lib/rag/local-search';
@@ -144,6 +147,12 @@ type ChatMessage = {
   role: 'assistant' | 'user';
   text: string;
   sources?: SourceReference[];
+  progress?: {
+    stage: SearchProgressStage;
+    message: string;
+    detail?: string;
+    startedAt: number;
+  };
 };
 
 type UploadJob = Omit<DocumentIngestionJob, 'id' | 'stage'> & {
@@ -314,47 +323,50 @@ function chunkRangeLabel(chunk: DocumentChunk) {
   return `범위 · 블록 ${first.blockIndex + 1}:${first.startOffset} → ${last.blockIndex + 1}:${last.endOffset}`;
 }
 
-async function searchRepository(
-  documents: IndexedDocument[],
-  query: string,
-  folderId: string | null,
-) {
-  const response = await fetch('/api/search', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      query,
-      folderId,
-      topK: 8,
-    }),
-  });
-  const payload = await response.json().catch(() => null) as
-    | SearchDocumentsResponse
-    | ApiErrorResponse
-    | null;
-
-  if (response.ok && payload && 'sources' in payload) {
-    return { answer: payload.answer, sources: payload.sources };
-  }
-  if (
-    response.status === 503 &&
-    payload &&
-    'code' in payload &&
-    payload.code === 'VECTOR_SEARCH_NOT_CONFIGURED'
-  ) {
-    const sources = searchDocuments(documents, query);
-    return { answer: composeExtractiveAnswer(sources), sources };
-  }
-  const message = payload && 'error' in payload
-    ? payload.error
-    : '문서 검색 요청을 처리하지 못했습니다.';
-  throw new Error(message);
-}
-
 function fileIcon(type: IndexedDocument['document']['sourceType']) {
   if (type === 'xlsx') return FileSpreadsheet;
   if (type === 'html' || type === 'markdown') return FileCode2;
   return FileText;
+}
+
+function SearchProgressTimeline({
+  detail,
+  message,
+  now,
+  stage,
+  startedAt,
+}: {
+  detail?: string;
+  message: string;
+  now: number;
+  stage: SearchProgressStage;
+  startedAt: number;
+}) {
+  const activeIndex = SEARCH_PROGRESS_PRESENTATION.findIndex((step) => step.stage === stage);
+  const elapsedSeconds = Math.max(0, Math.floor((now - startedAt) / 1_000));
+  return (
+    <div className="search-progress-card" role="status" aria-live="polite">
+      <div className="search-progress-head">
+        <strong>{message}</strong>
+        <span aria-hidden="true">경과 {elapsedSeconds}초</span>
+      </div>
+      {detail ? <p>{detail}</p> : null}
+      <ol className="search-progress-steps">
+        {SEARCH_PROGRESS_PRESENTATION.map((step, index) => {
+          const state = index < activeIndex ? 'done' : index === activeIndex ? 'active' : 'pending';
+          return (
+            <li className={state} key={step.stage}>
+              <span className="search-progress-icon" aria-hidden="true">
+                {state === 'done' ? <CheckCircle2 size={15} /> : null}
+                {state === 'active' ? <LoaderCircle className="spin" size={15} /> : null}
+              </span>
+              <span>{step.label}</span>
+            </li>
+          );
+        })}
+      </ol>
+    </div>
+  );
 }
 
 function clamp(value: number, minimum: number, maximum: number) {
@@ -928,6 +940,7 @@ export function DocumentRagApp({
     message: string;
   } | null>(null);
   const [searchBusy, setSearchBusy] = useState(false);
+  const [searchProgressNow, setSearchProgressNow] = useState(() => Date.now());
   const [system, setSystem] = useState<SystemStatus | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const folderInputRef = useRef<HTMLInputElement | null>(null);
@@ -1042,6 +1055,13 @@ export function DocumentRagApp({
     const conversation = conversationRef.current;
     if (conversation) conversation.scrollTop = conversation.scrollHeight;
   }, [messages]);
+
+  useEffect(() => {
+    if (!searchBusy) return;
+    setSearchProgressNow(Date.now());
+    const timer = window.setInterval(() => setSearchProgressNow(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, [searchBusy]);
 
   useEffect(() => {
     if (!sourcePreview) return;
@@ -2060,38 +2080,76 @@ export function DocumentRagApp({
     if (!question || searchBusy) return;
 
     const now = Date.now();
+    const assistantMessageId = `assistant-${now}`;
     setQuery('');
     setSearchBusy(true);
+    setSearchProgressNow(now);
     setMessages((current) => [
       ...current,
       { id: `user-${now}`, role: 'user', text: question },
+      {
+        id: assistantMessageId,
+        role: 'assistant',
+        text: '',
+        progress: {
+          stage: 'preparing',
+          message: '검색 요청과 범위를 확인하고 있습니다.',
+          startedAt: now,
+        },
+      },
     ]);
+    setActiveSources([]);
+
+    const updateProgress = (progress: SearchProgressEvent) => {
+      setMessages((current) => current.map((message) => (
+        message.id === assistantMessageId
+          && message.progress
+          && isSearchProgressForward(message.progress.stage, progress.stage)
+          ? {
+              ...message,
+              progress: {
+                stage: progress.stage,
+                message: progress.message,
+                detail: progress.detail,
+                startedAt: message.progress.startedAt,
+              },
+            }
+          : message
+      )));
+    };
 
     try {
       const scopedDocuments = searchFolderId
         ? documentsInFolderScope(documents, folders, searchFolderId, { recursive: true })
         : documents;
-      const result = await searchRepository(scopedDocuments, question, searchFolderId || null);
-      setMessages((current) => [
-        ...current,
-        {
-          id: `assistant-${now}`,
-          role: 'assistant',
-          text: result.answer,
-          sources: result.sources,
-        },
-      ]);
+      const result = await searchRepository({
+        documents: scopedDocuments,
+        query: question,
+        folderId: searchFolderId || null,
+        onProgress: updateProgress,
+      });
+      setMessages((current) => current.map((message) => (
+        message.id === assistantMessageId
+          ? {
+              id: assistantMessageId,
+              role: 'assistant',
+              text: result.answer,
+              sources: result.sources,
+            }
+          : message
+      )));
       setActiveSources(result.sources);
       if (result.sources[0]) setSelectedDocumentId(result.sources[0].documentId);
     } catch (error) {
-      setMessages((current) => [
-        ...current,
-        {
-          id: `assistant-${now}`,
-          role: 'assistant',
-          text: error instanceof Error ? error.message : '문서 검색에 실패했습니다.',
-        },
-      ]);
+      setMessages((current) => current.map((message) => (
+        message.id === assistantMessageId
+          ? {
+              id: assistantMessageId,
+              role: 'assistant',
+              text: error instanceof Error ? error.message : '문서 검색에 실패했습니다.',
+            }
+          : message
+      )));
       setActiveSources([]);
     } finally {
       setSearchBusy(false);
@@ -2394,7 +2452,17 @@ export function DocumentRagApp({
                   </div>
                   <div className="message-content">
                     <span className="message-author">{message.role === 'assistant' ? 'Sageum' : '나'}</span>
-                    <p>{message.text}</p>
+                    {message.progress ? (
+                      <SearchProgressTimeline
+                        detail={message.progress.detail}
+                        message={message.progress.message}
+                        now={searchProgressNow}
+                        stage={message.progress.stage}
+                        startedAt={message.progress.startedAt}
+                      />
+                    ) : (
+                      <p>{message.text}</p>
+                    )}
                     {message.sources?.length ? (
                       <div className="inline-sources">
                         {message.sources.map((source, index) => (

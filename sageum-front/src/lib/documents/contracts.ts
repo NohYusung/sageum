@@ -113,6 +113,28 @@ export type SearchDocumentsResponse = {
   relationMode: 'expanded' | 'content-only' | 'fallback';
 };
 
+export const SEARCH_PROGRESS_STAGES = [
+  'preparing',
+  'retrieving',
+  'expanding',
+  'generating',
+  'verifying',
+] as const;
+
+export type SearchProgressStage = (typeof SEARCH_PROGRESS_STAGES)[number];
+
+export type SearchProgressEvent = {
+  type: 'progress';
+  stage: SearchProgressStage;
+  message: string;
+  detail?: string;
+};
+
+export type SearchStreamEvent =
+  | SearchProgressEvent
+  | { type: 'result'; data: SearchDocumentsResponse }
+  | { type: 'error'; error: string; code?: string };
+
 export type ApiErrorResponse = {
   error: string;
   code?: string;

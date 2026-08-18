@@ -10,7 +10,7 @@ import {
   type Edge,
   type Node,
 } from '@xyflow/react';
-import { Bot, ChevronRight, FileText, LoaderCircle, X } from 'lucide-react';
+import { Bot, ChevronRight, FileText, LoaderCircle, SlidersHorizontal, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import {
   type KnowledgeGraph,
@@ -78,6 +78,8 @@ export function KnowledgeGraphView({
   const [error, setError] = useState<string | null>(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const [selectedRuleId, setSelectedRuleId] = useState<string | null>(null);
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
+  const [mobileGraph, setMobileGraph] = useState(false);
   const [visibility, setVisibility] = useState({
     'document-document': true,
     'rule-document': true,
@@ -93,6 +95,17 @@ export function KnowledgeGraphView({
   const laidOut = useMemo(() => layoutGraph(filteredGraph), [filteredGraph]);
   const [nodes, setNodes, onNodesChange] = useNodesState(laidOut.nodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(laidOut.edges);
+
+  useEffect(() => {
+    const media = window.matchMedia('(max-width: 720px)');
+    const update = () => {
+      setMobileGraph(media.matches);
+      if (!media.matches) setMobileFiltersOpen(false);
+    };
+    update();
+    media.addEventListener('change', update);
+    return () => media.removeEventListener('change', update);
+  }, []);
 
   useEffect(() => {
     setNodes(laidOut.nodes);
@@ -146,8 +159,23 @@ export function KnowledgeGraphView({
   return (
     <div className="knowledge-graph-shell">
       <div className="knowledge-graph-toolbar">
-        <div><strong>통합 의미 관계 그래프</strong><small>문서와 규칙의 의미 유사도 연결 및 고립 노드를 함께 표시합니다.</small></div>
-        <div className="knowledge-graph-toggles" aria-label="그래프 연결 표시 필터">
+        <div className="knowledge-graph-toolbar-heading">
+          <div><strong>통합 의미 관계 그래프</strong><small>문서와 규칙의 의미 유사도 연결 및 고립 노드를 함께 표시합니다.</small></div>
+          <button
+            aria-controls="knowledge-graph-mobile-filters"
+            aria-expanded={mobileFiltersOpen}
+            className="knowledge-graph-mobile-filter-toggle"
+            type="button"
+            onClick={() => setMobileFiltersOpen((open) => !open)}
+          >
+            <SlidersHorizontal size={15} /> 필터
+          </button>
+        </div>
+        <div
+          className={`knowledge-graph-toggles${mobileFiltersOpen ? ' mobile-open' : ''}`}
+          id="knowledge-graph-mobile-filters"
+          aria-label="그래프 연결 표시 필터"
+        >
           {([
             ['document-document', '문서↔문서'],
             ['rule-document', '규칙↔문서'],
@@ -172,6 +200,7 @@ export function KnowledgeGraphView({
         {!loading && !error && !nodes.length ? <div className="knowledge-graph-state">표시할 문서와 규칙이 없습니다.</div> : null}
         {!error && nodes.length ? (
           <ReactFlow
+            key={mobileGraph ? 'mobile' : 'desktop'}
             nodes={nodes}
             edges={edges}
             onNodesChange={onNodesChange}
@@ -192,11 +221,14 @@ export function KnowledgeGraphView({
               setSelectedEdgeId(edge.id);
             }}
             fitView
-            minZoom={0.2}
+            fitViewOptions={mobileGraph
+              ? { padding: 0.12, minZoom: 0.45, maxZoom: 1.2 }
+              : { padding: 0.1 }}
+            minZoom={mobileGraph ? 0.45 : 0.2}
             maxZoom={1.8}
           >
             <Background gap={18} size={1} />
-            <MiniMap pannable zoomable />
+            {!mobileGraph ? <MiniMap pannable zoomable /> : null}
             <Controls />
           </ReactFlow>
         ) : null}

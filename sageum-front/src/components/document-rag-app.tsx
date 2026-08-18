@@ -883,6 +883,7 @@ export function DocumentRagApp({
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [sidebarPreferenceReady, setSidebarPreferenceReady] = useState(false);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  const [mobileFolderOpen, setMobileFolderOpen] = useState(false);
   const [oauthConnectionsModalOpen, setOAuthConnectionsModalOpen] = useState(false);
   const [documents, setDocuments] = useState<IndexedDocument[]>(() => initialDocuments);
   const [folders, setFolders] = useState<RepositoryFolder[]>(() => initialFolders);
@@ -947,6 +948,9 @@ export function DocumentRagApp({
   const repositoryFileInputRef = useRef<HTMLInputElement | null>(null);
   const repositoryFolderInputRef = useRef<HTMLInputElement | null>(null);
   const repositoryUploadMenuRef = useRef<HTMLDivElement | null>(null);
+  const mobileFolderTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const mobileFolderCloseRef = useRef<HTMLButtonElement | null>(null);
+  const documentOpenTriggerRef = useRef<HTMLButtonElement | null>(null);
   const retryFileInputRef = useRef<HTMLInputElement | null>(null);
   const conversationRef = useRef<HTMLDivElement | null>(null);
   const documentLayoutRef = useRef<HTMLDivElement | null>(null);
@@ -1038,6 +1042,28 @@ export function DocumentRagApp({
       document.removeEventListener('keydown', closeOnEscape);
     };
   }, [repositoryUploadMenuOpen]);
+
+  useEffect(() => {
+    if (!mobileFolderOpen) return;
+    document.body.classList.add('repository-mobile-folder-open');
+    const focusTimer = window.setTimeout(() => mobileFolderCloseRef.current?.focus(), 80);
+    const closeOnEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      setMobileFolderOpen(false);
+      window.requestAnimationFrame(() => mobileFolderTriggerRef.current?.focus());
+    };
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      window.clearTimeout(focusTimer);
+      document.body.classList.remove('repository-mobile-folder-open');
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [mobileFolderOpen]);
+
+  useEffect(() => {
+    if (view === 'documents') return;
+    setMobileFolderOpen(false);
+  }, [view]);
 
   useEffect(() => {
     if (view !== 'upload-status') return;
@@ -1277,6 +1303,12 @@ export function DocumentRagApp({
         ? externalPreviewDocument
         : undefined)
     : undefined;
+
+  useEffect(() => {
+    if (view !== 'documents' || !selectedDocument) return;
+    document.body.classList.add('repository-mobile-inspector-open');
+    return () => document.body.classList.remove('repository-mobile-inspector-open');
+  }, [selectedDocument, view]);
 
   useEffect(() => {
     if (!repositorySelectAllRef.current) return;
@@ -1743,6 +1775,14 @@ export function DocumentRagApp({
     setRepositoryDeleteError(null);
     setExpandedStructureChunkId(null);
     setFolderActionError(null);
+    if (mobileFolderOpen) closeMobileFolderDrawer();
+  }
+
+  function closeMobileFolderDrawer(restoreFocus = true) {
+    setMobileFolderOpen(false);
+    if (restoreFocus) {
+      window.requestAnimationFrame(() => mobileFolderTriggerRef.current?.focus());
+    }
   }
 
   function toggleRepositoryDocumentSelection(documentId: string, checked: boolean) {
@@ -1799,6 +1839,7 @@ export function DocumentRagApp({
     setSelectedDocumentId('');
     setExpandedStructureChunkId(null);
     setDocumentActionError(null);
+    window.requestAnimationFrame(() => documentOpenTriggerRef.current?.focus());
   }
 
   async function handleCreateFolder() {
@@ -2229,6 +2270,8 @@ export function DocumentRagApp({
     if (!item) return;
     setSelectedFolderId(item.document.folderId ?? null);
     setDocumentFilter('');
+    documentOpenTriggerRef.current = null;
+    setMobileFolderOpen(false);
     setSelectedDocumentId(documentId);
   }
 
@@ -2555,6 +2598,16 @@ export function DocumentRagApp({
 
             <div className="document-toolbar">
               <nav className="folder-breadcrumb" aria-label="현재 폴더 경로">
+                <button
+                  aria-controls="repository-folder-drawer"
+                  aria-expanded={mobileFolderOpen}
+                  className="mobile-folder-trigger"
+                  ref={mobileFolderTriggerRef}
+                  type="button"
+                  onClick={() => setMobileFolderOpen(true)}
+                >
+                  <FolderOpen size={15} /> 폴더
+                </button>
                 <button type="button" onClick={() => selectFolder(null)}>
                   <Home size={14} /> 내 문서
                 </button>
@@ -2589,12 +2642,36 @@ export function DocumentRagApp({
                 '--document-inspector-width': `${inspectorWidth}px`,
               } as CSSProperties}
             >
-              <aside className="folder-navigation">
+              {mobileFolderOpen ? (
+                <button
+                  aria-label="폴더 탐색 닫기"
+                  className="mobile-folder-backdrop"
+                  tabIndex={-1}
+                  type="button"
+                  onClick={() => closeMobileFolderDrawer()}
+                />
+              ) : null}
+              <aside
+                aria-label="폴더 탐색"
+                className={`folder-navigation${mobileFolderOpen ? ' mobile-open' : ''}`}
+                id="repository-folder-drawer"
+              >
                 <div className="folder-navigation-heading">
                   <span>FOLDERS</span>
-                  <button type="button" onClick={() => void handleCreateFolder()} disabled={folderBusy} title="새 폴더">
-                    {folderBusy ? <LoaderCircle size={15} className="spin" /> : <FolderPlus size={15} />}
-                  </button>
+                  <div className="folder-navigation-heading-actions">
+                    <button type="button" onClick={() => void handleCreateFolder()} disabled={folderBusy} title="새 폴더">
+                      {folderBusy ? <LoaderCircle size={15} className="spin" /> : <FolderPlus size={15} />}
+                    </button>
+                    <button
+                      aria-label="폴더 탐색 닫기"
+                      className="mobile-folder-close"
+                      ref={mobileFolderCloseRef}
+                      type="button"
+                      onClick={() => closeMobileFolderDrawer()}
+                    >
+                      <X size={16} />
+                    </button>
+                  </div>
                 </div>
                 <button
                   className={`folder-tree-root ${selectedFolderId === null ? 'selected' : ''} ${dragOverFolderId === 'root' ? 'drop-target' : ''}`}
@@ -2956,7 +3033,10 @@ export function DocumentRagApp({
                           className="repository-entry-open"
                           draggable
                           type="button"
-                          onClick={() => setSelectedDocumentId(item.document.id)}
+                          onClick={(event) => {
+                            documentOpenTriggerRef.current = event.currentTarget;
+                            setSelectedDocumentId(item.document.id);
+                          }}
                           onDragStart={(event) => {
                             event.dataTransfer.effectAllowed = 'move';
                             event.dataTransfer.setData(DOCUMENT_DRAG_TYPE, item.document.id);
